@@ -3,7 +3,18 @@ from tkinter import ttk, messagebox
 import json
 import os
 import tempfile
+import threading
+import time
 from datetime import datetime, timedelta
+import sys
+
+# --- НОВОЕ: Библиотеки для трея ---
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    HAS_TRAY = True
+except ImportError:
+    HAS_TRAY = False
 
 # ================= Windows API =================
 try:
@@ -14,7 +25,11 @@ try:
 except Exception:
     IS_WINDOWS = False
 
-DATA_FILE = "notes_data.json"
+# --- НОВОЕ: Путь к данным в AppData, чтобы не терять заметки при переносе exe ---
+APP_DATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'MyNotesApp')
+os.makedirs(APP_DATA_DIR, exist_ok=True)
+DATA_FILE = os.path.join(APP_DATA_DIR, "notes_data.json")
+
 CHECK_INTERVAL = 30
 WARN_BEFORE = 60
 
@@ -23,7 +38,7 @@ BG_MAIN    = "#f2f2f2"
 BG_PANEL   = "#ffffff"   
 BG_BUTTON  = "#e0e0e0"   
 FG_TEXT    = "#202020"   
-COLOR_DONE = "red"       # Цвет для наступивших событий
+COLOR_DONE = "red"       
 ALPHA      = 0.65        
 
 HWND_BOTTOM    = 1
@@ -60,8 +75,8 @@ class NotesApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Заметки")
-        self.root.geometry("360x520+{}+{}".format(
-            root.winfo_screenwidth() - 380, 30))
+        self.root.geometry("380x540+{}+{}".format(
+            root.winfo_screenwidth() - 400, 30))
         self.root.configure(bg=BG_MAIN)
         
         self.root.attributes("-alpha", ALPHA)
@@ -72,7 +87,11 @@ class NotesApp:
         self.load_data()
 
         self.warned = {}
-        self.pending_alerts = []  # Очередь для отложенных напоминаний
+        self.pending_alerts = []
+        
+        # --- НОВОЕ: Переменная для иконки трея ---
+        self.tray_icon = None
+        self.is_hidden = False
 
         self.build_ui()
         self.refresh_list()
@@ -80,11 +99,10 @@ class NotesApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.check_job = None
         self.alert_job = None
-        self.ensure_visible_job = None
         self.check_events(initial=True)
 
         self.keep_bottom_job = None
-        self.ensure_visible_job = self.root.after(500, self._ensure_visible)
+        self.root.after(500, self._ensure_visible)
         self.root.after(1200, self._start_keep_bottom)
 
     def _ensure_visible(self):
@@ -135,6 +153,11 @@ class NotesApp:
             .pack(side="left", padx=2)
         ttk.Button(top, text="✖ Удалить", command=self.delete_selected)\
             .pack(side="left", padx=2)
+            
+        # --- НОВОЕ: Кнопка очистки прошедших ---
+        ttk.Button(top, text="Очистить", command=self.clear_past_events)\
+            .pack(side="left", padx=2)
+            
         ttk.Button(top, text="Свернуть", command=self.hide_window)\
             .pack(side="right", padx=2)
 
@@ -161,7 +184,7 @@ class NotesApp:
         
         self.event_list.bind("<<ListboxSelect>>", lambda e: self.show_details())
 
-        self.desc = tk.Text(self.root, height=5, bg=BG_PANEL,
+        self.desc = tk.Text(self.root, height=6, bg=BG_PANEL,
                             fg=FG_TEXT, insertbackground=FG_TEXT, wrap="word",
                             relief="flat", highlightthickness=1,
                             highlightbackground="#cccccc")
@@ -179,7 +202,6 @@ class NotesApp:
 
     # ---------------- Хранилище ----------------
     def load_data(self):
-        self.load_error = None
         if not os.path.exists(DATA_FILE):
             self.events = []
             return
@@ -212,18 +234,11 @@ class NotesApp:
             self.load_error = error
             messagebox.showerror(
                 "Ошибка чтения",
-                f"Не удалось загрузить заметки из {DATA_FILE}:\n{error}\n\n"
-                "Приложение откроется с пустым списком.\n"
-                "После исправления файла можно сохранить заметки снова.")
+                f"Не удалось загрузить заметки:\n{DATA_FILE}\n\n{error}")
 
     def save_data(self, events):
         if self.load_error is not None:
-            answer = messagebox.askyesno(
-                "Ошибка чтения",
-                f"Файл заметок повреждён ({self.load_error}).\n"
-                "Перезаписать его новыми данными?")
-            if not answer:
-                return False
+            return False
         temporary_path = None
         try:
             directory = os.path.dirname(os.path.abspath(DATA_FILE))
@@ -232,11 +247,9 @@ class NotesApp:
                 temporary_path = f.name
                 json.dump(events, f, ensure_ascii=False, indent=2)
             os.replace(temporary_path, DATA_FILE)
-            self.load_error = None
             return True
         except (OSError, TypeError, ValueError) as error:
-            messagebox.showerror("Ошибка сохранения",
-                                 f"Не удалось сохранить заметки:\n{error}")
+            messagebox.showerror("Ошибка сохранения", f"Не удалось сохранить:\n{error}")
             return False
         finally:
             if temporary_path and os.path.exists(temporary_path):
@@ -257,7 +270,6 @@ class NotesApp:
             display_text = f" {dt.strftime('%d.%m.%Y')}  {dt.strftime('%H:%M')}   {ev['title']}"
             self.event_list.insert(tk.END, display_text)
             
-            # Красим в красный, если событие уже наступило
             if dt <= datetime.now():
                 self.event_list.itemconfig(i, foreground=COLOR_DONE)
 
@@ -325,26 +337,73 @@ class NotesApp:
         self.warned.pop(event_id, None)
         self.refresh_list()
 
-    # ---------------- Скрытие / восстановление ----------------
-    def hide_window(self):
-        if getattr(self, "tray", None) is not None and self.tray.winfo_exists():
+    # --- НОВОЕ: Очистка прошедших ---
+    def clear_past_events(self):
+        now = datetime.now()
+        past_events = [e for e in self.events if datetime.fromisoformat(e["datetime"]) <= now]
+        if not past_events:
+            messagebox.showinfo("Заметки", "Нет прошедших событий.")
             return
-        self.root.withdraw()
-        self.tray = tk.Toplevel(self.root)
-        self.tray.title("Заметки")
-        self.tray.geometry("60x28+{}+{}".format(
-            self.root.winfo_screenwidth() - 80, 10))
-        self.tray.configure(bg=BG_MAIN)
-        self.tray.attributes("-alpha", ALPHA)
+            
+        if not messagebox.askyesno("Заметки", f"Удалить все прошедшие события ({len(past_events)} шт.)?"):
+            return
+            
+        self.events = [e for e in self.events if datetime.fromisoformat(e["datetime"]) > now]
+        for e in past_events:
+            self.warned.pop(e["id"], None)
+            
+        self.save_data(self.events)
+        self.refresh_list()
 
-        btn = tk.Button(self.tray, text="📝", command=self.restore_window,
-                        bg=BG_BUTTON, fg=FG_TEXT, bd=0, font=("Arial", 12))
-        btn.pack(fill="both", expand=True)
+    # ---------------- Скрытие в трей ----------------
+    def hide_window(self):
+        self.root.withdraw()
+        self.is_hidden = True
+        
+        if HAS_TRAY:
+            if self.tray_icon is None:
+                self._create_tray_icon()
+            self.tray_icon.run_detached()
+        else:
+            # Fallback, если pystray не установлен
+            self.tray = tk.Toplevel(self.root)
+            self.tray.title("Заметки")
+            self.tray.geometry("60x28+{}+{}".format(
+                self.root.winfo_screenwidth() - 80, 10))
+            self.tray.configure(bg=BG_MAIN)
+            self.tray.attributes("-alpha", ALPHA)
+            btn = tk.Button(self.tray, text="📝", command=self.restore_window,
+                            bg=BG_BUTTON, fg=FG_TEXT, bd=0, font=("Arial", 12))
+            btn.pack(fill="both", expand=True)
+
+    def _create_tray_icon(self):
+        # Создаем простую иконку
+        image = Image.new('RGB', (64, 64), color=(240, 240, 240))
+        d = ImageDraw.Draw(image)
+        d.rectangle([10, 10, 54, 54], outline="black", width=3)
+        d.line([20, 25, 44, 25], fill="black", width=3)
+        d.line([20, 35, 44, 35], fill="black", width=3)
+        d.line([20, 45, 35, 45], fill="black", width=3)
+        
+        menu = pystray.Menu(
+            pystray.MenuItem('Открыть', self._tray_restore),
+            pystray.MenuItem('Выход', self._tray_exit)
+        )
+        self.tray_icon = pystray.Icon("MyNotes", image, "Заметки", menu)
+
+    def _tray_restore(self, icon, item):
+        icon.stop()
+        self.tray_icon = None
+        self.root.after(0, self.restore_window)
+
+    def _tray_exit(self, icon, item):
+        icon.stop()
+        self.root.after(0, self.on_close)
 
     def restore_window(self):
-        if getattr(self, "tray", None) is not None and self.tray.winfo_exists():
+        if not HAS_TRAY and hasattr(self, 'tray'):
             self.tray.destroy()
-            self.tray = None
+        self.is_hidden = False
         self.root.deiconify()
         self.root.after(300, self._ensure_visible)
 
@@ -369,7 +428,6 @@ class NotesApp:
                         f"{event.get('description', '')}",
                         count=3
                     )
-                    # Обновляем список, чтобы событие стало красным
                     self.refresh_list()
             elif delta <= WARN_BEFORE and "warn" not in flags:
                 flags.add("warn")
@@ -385,13 +443,11 @@ class NotesApp:
             CHECK_INTERVAL * 1000, self.check_events)
 
     def schedule_alert(self, title, text, count=3):
-        """Добавляет оповещение в очередь и запускает процесс показа"""
         self.pending_alerts.append({"title": title, "text": text, "left": count})
         if self.alert_job is None:
             self.show_next_alert()
 
     def show_next_alert(self):
-        """Показывает следующее оповещение из очереди"""
         if not self.pending_alerts:
             self.alert_job = None
             return
@@ -401,29 +457,23 @@ class NotesApp:
         
         alert["left"] -= 1
         if alert["left"] > 0:
-            # Ждем 10 секунд и показываем снова
             self.alert_job = self.root.after(10000, self.show_next_alert)
         else:
-            # Оповещение завершено, удаляем из очереди
             self.pending_alerts.pop(0)
             self.alert_job = None
-            # Если есть следующие — показываем сразу
             if self.pending_alerts:
                 self.alert_job = self.root.after(100, self.show_next_alert)
 
     def on_close(self):
-        if self.ensure_visible_job is not None:
-            self.root.after_cancel(self.ensure_visible_job)
-            self.ensure_visible_job = None
+        if HAS_TRAY and self.tray_icon is not None:
+            self.tray_icon.stop()
+            
         if self.check_job is not None:
             self.root.after_cancel(self.check_job)
-            self.check_job = None
         if self.keep_bottom_job is not None:
             self.root.after_cancel(self.keep_bottom_job)
-            self.keep_bottom_job = None
         if self.alert_job is not None:
             self.root.after_cancel(self.alert_job)
-            self.alert_job = None
         self.root.destroy()
 
 
@@ -443,31 +493,31 @@ class EventDialog(tk.Toplevel):
         tk.Label(self, text="Название:", bg=BG_MAIN, fg=FG_TEXT)\
             .pack(anchor="w", **pad)
         self.title_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT,
-                                    insertbackground=FG_TEXT, relief="solid",
-                                    bd=1)
+                                    insertbackground=FG_TEXT, relief="solid", bd=1)
         self.title_entry.pack(fill="x", padx=10)
+        # НОВОЕ: Привязка Enter к сохранению
+        self.title_entry.bind("<Return>", lambda e: self.save())
 
         tk.Label(self, text="Описание:", bg=BG_MAIN, fg=FG_TEXT)\
             .pack(anchor="w", **pad)
         self.desc_text = tk.Text(self, height=4, wrap="word",
                                  bg=BG_PANEL, fg=FG_TEXT,
-                                 insertbackground=FG_TEXT, relief="solid",
-                                 bd=1)
+                                 insertbackground=FG_TEXT, relief="solid", bd=1)
         self.desc_text.pack(fill="x", padx=10)
 
         tk.Label(self, text="Дата (ДД.ММ.ГГГГ):", bg=BG_MAIN, fg=FG_TEXT)\
             .pack(anchor="w", **pad)
         self.date_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT,
-                                   insertbackground=FG_TEXT, relief="solid",
-                                   bd=1)
+                                   insertbackground=FG_TEXT, relief="solid", bd=1)
         self.date_entry.pack(fill="x", padx=10)
+        self.date_entry.bind("<Return>", lambda e: self.save())
 
         tk.Label(self, text="Время (ЧЧ:ММ):", bg=BG_MAIN, fg=FG_TEXT)\
             .pack(anchor="w", **pad)
         self.time_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT,
-                                   insertbackground=FG_TEXT, relief="solid",
-                                   bd=1)
+                                   insertbackground=FG_TEXT, relief="solid", bd=1)
         self.time_entry.pack(fill="x", padx=10)
+        self.time_entry.bind("<Return>", lambda e: self.save())
 
         tk.Button(self, text="Сохранить", command=self.save,
                   bg=BG_BUTTON, fg=FG_TEXT, relief="flat").pack(pady=10)
@@ -486,8 +536,7 @@ class EventDialog(tk.Toplevel):
     def save(self):
         title = self.title_entry.get().strip()
         if not title:
-            messagebox.showerror("Ошибка", "Введите название события",
-                                 parent=self)
+            messagebox.showerror("Ошибка", "Введите название события", parent=self)
             return
         try:
             dt = datetime.strptime(
@@ -496,8 +545,7 @@ class EventDialog(tk.Toplevel):
         except ValueError:
             messagebox.showerror("Ошибка",
                                  "Неверный формат даты/времени.\n"
-                                 "Используйте ДД.ММ.ГГГГ и ЧЧ:ММ",
-                                 parent=self)
+                                 "Используйте ДД.ММ.ГГГГ и ЧЧ:ММ", parent=self)
             return
         data = {
             "title": title,
@@ -508,7 +556,23 @@ class EventDialog(tk.Toplevel):
             self.destroy()
 
 
+# --- НОВОЕ: Защита от запуска двух копий ---
+def is_already_running():
+    if not IS_WINDOWS:
+        return False
+    mutex_name = "Global\\MyNotesAppMutex_UniqueName123"
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, mutex_name)
+    # 183 = ERROR_ALREADY_EXISTS
+    return kernel32.GetLastError() == 183
+
 if __name__ == "__main__":
+    if is_already_running():
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showwarning("Заметки", "Программа уже запущена!")
+        sys.exit(0)
+
     root = tk.Tk()
     app = NotesApp(root)
     root.mainloop()
