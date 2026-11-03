@@ -20,7 +20,7 @@ BG_BUTTON = "#e0e0e0"
 FG_TEXT = "#090202"
 COLOR_DONE = "red"
 ALPHA = 1.0
-APP_FONT = ("Segoe UI", 14)
+APP_FONT = ("Segoe UI", 20)
 
 CHECK_INTERVAL = 30
 WARN_BEFORE = 60

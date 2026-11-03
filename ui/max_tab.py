@@ -24,25 +24,30 @@ class MaxTab(ctk.CTkFrame):
 
         action_row = ctk.CTkFrame(top, fg_color="transparent")
         action_row.pack(side="top", anchor="w")
+        
+        # Увеличены размеры кнопок под новый крупный шрифт
         ctk.CTkButton(
             action_row,
             text="🔄 Обновить",
             command=self.main_app.refresh_inbox,
-            width=130,
+            width=180,
+            height=45,
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)
         ctk.CTkButton(
             action_row,
             text="🗑 Очистить",
             command=self.main_app.clear_inbox_list,
-            width=130,
+            width=180,
+            height=45,
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)
         ctk.CTkButton(
             action_row,
             text="➡ В события",
             command=self._open_add_event_from_selected,
-            width=130,
+            width=180,
+            height=45,
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)
 
@@ -52,7 +57,8 @@ class MaxTab(ctk.CTkFrame):
             folder_row,
             text="📂 Открыть папку",
             command=lambda: self.main_app.open_file(INBOX_DIR),
-            width=170,
+            width=220,
+            height=45,
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)
 
@@ -149,9 +155,12 @@ class MaxTab(ctk.CTkFrame):
         # Сохраняем текст в атрибут карточки
         card.note_text = text
 
-        # Создаём все дочерние элементы
+        # Создаём все дочерние элементы с крупным шрифтом
         time_label = self._create_child_label(
-            card, text=f"📅  {dt.strftime('%d.%m.%Y  %H:%M:%S')}", font=("Segoe UI", 11), text_color="#888888"
+            card,
+            text=f"📅  {dt.strftime('%d.%m.%Y  %H:%M:%S')}",
+            font=("Segoe UI", 16),  # Увеличено для читаемости
+            text_color="#888888",
         )
         time_label.pack(anchor="w", padx=10, pady=(8, 0))
 
@@ -161,9 +170,13 @@ class MaxTab(ctk.CTkFrame):
         )
         divider.pack(fill="x", padx=10, pady=(4, 0))
 
-        # Текст заметки
+        # Текст заметки — крупный шрифт
         content_label = self._create_child_label(
-            card, text=text, font=("Segoe UI", 13), justify="left", wraplength=380
+            card,
+            text=text,
+            font=("Segoe UI", 20),  # Увеличено для читаемости
+            justify="left",
+            wraplength=380,
         )
         content_label.pack(anchor="w", padx=10, pady=(4, 8))
 

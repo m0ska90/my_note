@@ -58,7 +58,7 @@ class EventsTab(ctk.CTkFrame):
             fg=FG_TEXT,
             selectbackground="#bcd6f0",
             selectforeground="#000000",
-            font=("Segoe UI", 14),
+            font=("Segoe UI", 20),  # Крупный шрифт для списка
             yscrollcommand=scrollbar.set,
             relief="flat",
             highlightthickness=1,
@@ -68,7 +68,13 @@ class EventsTab(ctk.CTkFrame):
         scrollbar.config(command=self.event_list.yview)
         self.event_list.bind("<<ListboxSelect>>", self.show_details)
 
-        self.desc = ctk.CTkTextbox(self, height=120, wrap="word", font=APP_FONT)
+        # Поле описания с явным указанием крупного шрифта
+        self.desc = ctk.CTkTextbox(
+            self,
+            height=120,
+            wrap="word",
+            font=("Segoe UI", 20),  # Явно указываем крупный шрифт
+        )
         self.desc.pack(fill="x", padx=6, pady=(0, 6))
         self.desc.configure(state="disabled")
 
