@@ -2,6 +2,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime
 
 import customtkinter as ctk
@@ -25,18 +26,6 @@ try:
     user32.GetParent.restype = wintypes.HWND
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.ShowWindow.restype = wintypes.BOOL
-    user32.SetWindowPos.argtypes = [
-        wintypes.HWND,
-        wintypes.HWND,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.c_int,
-        wintypes.UINT,
-    ]
-    user32.SetWindowPos.restype = wintypes.BOOL
-    user32.GetForegroundWindow.argtypes = []
-    user32.GetForegroundWindow.restype = wintypes.HWND
     IS_WINDOWS = True
 except (AttributeError, OSError):
     user32 = None
@@ -48,13 +37,9 @@ from config import (
     BG_MAIN,
     CHECK_INTERVAL,
     INBOX_DIR,
-    SWP_NOMOVE,
-    SWP_NOSIZE,
-    SWP_NOACTIVATE,
     SW_RESTORE,
     SW_SHOW,
     WARN_BEFORE,
-    HWND_BOTTOM,
 )
 from database import (
     add_event as db_add_event,
@@ -92,20 +77,6 @@ def show_window(hwnd):
     user32.ShowWindow(hwnd, SW_RESTORE)
 
 
-def send_to_bottom(hwnd):
-    if not IS_WINDOWS or not hwnd:
-        return
-    user32.SetWindowPos(
-        hwnd,
-        HWND_BOTTOM,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-    )
-
-
 def open_file(path):
     if IS_WINDOWS:
         os.startfile(path)
@@ -117,8 +88,9 @@ def open_file(path):
 class NotesApp:
     open_file = staticmethod(open_file)
 
-    def __init__(self, root):
+    def __init__(self, root, on_close_callback: Callable[[], None] | None = None):
         self.root = root
+        self.on_close_callback = on_close_callback
         self.root.title("Заметки и MAX")
         self.root.geometry(
             "420x600+{}+{}".format(root.winfo_screenwidth() - 440, 30)
@@ -143,9 +115,6 @@ class NotesApp:
         self.alert_job = None
         self.check_events(initial=True)
 
-        self.keep_bottom_job = None
-        self.root.after(500, self._ensure_visible)
-        self.root.after(1200, self._start_keep_bottom)
         self.root.after(2000, self.auto_refresh_inbox)
 
     def build_ui(self):
@@ -207,14 +176,24 @@ class NotesApp:
         ):
             return
 
-        rows = clear_attachments()
+        rows = clear_attachments(INBOX_DIR)
         if not rows:
             messagebox.showinfo("Вложения", "Список вложений уже пуст.", parent=self.root)
             return
 
         deleted_files = 0
+        skipped_files = 0
+        inbox_real = os.path.realpath(INBOX_DIR)
         for (file_path,) in rows:
-            full_path = os.path.join(INBOX_DIR, file_path)
+            # Защита от Path Traversal
+            clean_path = os.path.normpath(file_path)
+            if os.path.isabs(clean_path) or clean_path.startswith(".."):
+                skipped_files += 1
+                continue
+            full_path = os.path.realpath(os.path.join(INBOX_DIR, clean_path))
+            if not full_path.startswith(inbox_real + os.sep):
+                skipped_files += 1
+                continue
             try:
                 if os.path.isfile(full_path):
                     os.remove(full_path)
@@ -235,12 +214,10 @@ class NotesApp:
                 )
 
         self.refresh_inbox()
-        messagebox.showinfo(
-            "Очищено",
-            f"Удалено записей в БД: {len(rows)}\n"
-            f"Удалено файлов с диска: {deleted_files}",
-            parent=self.root,
-        )
+        msg = f"Удалено файлов с диска: {deleted_files}"
+        if skipped_files:
+            msg += f"\nПропущено подозрительных записей: {skipped_files}"
+        messagebox.showinfo("Очищено", msg, parent=self.root)
 
     def open_inbox_file(self, event=None):
         if event is not None and event.widget is not self.inbox_list:
@@ -324,38 +301,7 @@ class NotesApp:
         delete_past_events(now)
         self.refresh_list()
 
-    def _ensure_visible(self):
-        if not IS_WINDOWS:
-            return
-        try:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.update_idletasks()
-            hwnd = get_hwnd(self.root)
-            if hwnd:
-                show_window(hwnd)
-        except tk.TclError:
-            return
-
-    def _start_keep_bottom(self):
-        if not IS_WINDOWS:
-            return
-        self.keep_bottom_job = self.root.after(2000, self._keep_bottom_tick)
-
-    def _keep_bottom_tick(self):
-        if not IS_WINDOWS:
-            return
-        try:
-            if self.root.winfo_exists() and self.root.state() != "withdrawn":
-                hwnd = get_hwnd(self.root)
-                foreground_hwnd = user32.GetForegroundWindow()
-                if hwnd and (foreground_hwnd or 0) != hwnd:
-                    send_to_bottom(hwnd)
-        except tk.TclError:
-            return
-        self.keep_bottom_job = self.root.after(2000, self._keep_bottom_tick)
-
-    def hide_window(self):
+    def restore_window(self):
         if not HAS_TRAY:
             self.is_hidden = False
             self.root.iconify()
@@ -386,7 +332,13 @@ class NotesApp:
     def restore_window(self):
         self.is_hidden = False
         self.root.deiconify()
-        self.root.after(300, self._ensure_visible)
+        if IS_WINDOWS:
+            try:
+                hwnd = get_hwnd(self.root)
+                if hwnd:
+                    show_window(hwnd)
+            except tk.TclError:
+                pass
 
     def check_events(self, initial=False):
         self.check_job = None
@@ -468,7 +420,9 @@ class NotesApp:
     def on_close(self):
         if HAS_TRAY and self.tray_icon is not None:
             self.tray_icon.stop()
-        for job in (self.check_job, self.keep_bottom_job, self.alert_job):
+        if self.on_close_callback is not None:
+            self.on_close_callback()
+        for job in (self.check_job, self.alert_job):
             if job:
                 self.root.after_cancel(job)
         self.root.destroy()

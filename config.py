@@ -8,6 +8,7 @@ APP_DATA_DIR = os.path.join(
 DB_FILE = os.path.join(APP_DATA_DIR, "notes.db")
 INBOX_DIR = os.path.join(APP_DATA_DIR, "inbox")
 TOKEN_FILE = os.path.join(APP_DATA_DIR, "max_bot_token.dpapi")
+DB_KEY_FILE = os.path.join(APP_DATA_DIR, "db_key.dpapi")
 CERT_PATH = os.path.join(os.path.dirname(__file__), "combined_ca.pem")
 
 os.makedirs(APP_DATA_DIR, exist_ok=True)
@@ -24,9 +25,5 @@ APP_FONT = ("Segoe UI", 14)
 CHECK_INTERVAL = 30
 WARN_BEFORE = 60
 
-HWND_BOTTOM = 1
-SWP_NOSIZE = 0x0001
-SWP_NOMOVE = 0x0002
-SWP_NOACTIVATE = 0x0010
-SW_SHOW = 5
 SW_RESTORE = 9
+SW_SHOW = 5

@@ -1,5 +1,6 @@
 import ctypes
 import getpass
+import json
 import logging
 import os
 import re
@@ -39,6 +40,8 @@ if sys.platform == "win32":
 MAX_API_BASE_URL = "https://platform-api2.max.ru"
 MAX_API_MIN_INTERVAL = 1 / 30
 _last_api_request = 0.0
+_BOT_MUTEX_NAME = "Local\\MyNoteMaxBotReceiver"
+_BOT_MUTEX_HANDLE = None
 
 # Настраиваем сертификаты
 if os.path.exists(CERT_PATH):
@@ -104,6 +107,23 @@ def configure_token() -> None:
         raise ValueError("Токены не совпадают; сохранение отменено.")
     _save_token(token)
     logger.info("Токен зашифрован и сохранен: %s", TOKEN_FILE)
+
+def _get_allowed_chat_ids() -> set[int]:
+    """Загрузить вайтлист разрешённых chat_id из config.json.
+    
+    Возвращает пустой set если config не найден или список пуст —
+    это означает "принимать от всех" (backward compatibility).
+    """
+    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+        chat_ids = config.get("bot", {}).get("allowed_chat_ids", [])
+        return set(int(cid) for cid in chat_ids if isinstance(cid, (int, str)) and cid)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.debug("Не удалось загрузить allowed_chat_ids: %s, принимаем от всех.", e)
+        return set()
+
 
 def _attachment_path(url: str, prefix: str) -> str:
     """Формирует путь для сохранения вложения с определением типа файла.
@@ -237,8 +257,21 @@ def _fix_extension(file_path: str) -> str:
         logger.warning("Не удалось переименовать файл: %s", e)
         return file_path
 
-# --- Сетевые функции ---
+# --- Константы ---
+MAX_API_BASE_URL = "https://platform-api2.max.ru"
+MAX_API_MIN_INTERVAL = 1 / 30
+_last_api_request = 0.0
+
+# Максимальный размер вложения: 100 МБ
+MAX_FILE_SIZE = 100 * 1024 * 1024
+
+# Настраиваем сертификаты
+if os.path.exists(CERT_PATH):
+    os.environ["REQUESTS_CA_BUNDLE"] = CERT_PATH
+
+
 def _wait_for_api_slot() -> None:
+    """Обеспечивает соблюдение лимита запросов к API MAX (не более 30 в секунду)."""
     global _last_api_request
     delay = MAX_API_MIN_INTERVAL - (time.monotonic() - _last_api_request)
     if delay > 0:
@@ -389,6 +422,7 @@ def download_file(bot_token: str, url: str, save_path: str, max_retries: int = 3
         headers["Authorization"] = bot_token
 
     temp_path = None
+    downloaded_size = 0
     for attempt in range(max_retries):
         try:
             full_path = os.path.realpath(os.path.join(APP_DIR, save_path))
@@ -402,11 +436,34 @@ def download_file(bot_token: str, url: str, save_path: str, max_retries: int = 3
                 _wait_for_api_slot()
             with requests.get(url, headers=headers, timeout=30, stream=True) as response:
                 response.raise_for_status()
+
+                # Проверка Content-Length перед скачиванием
+                content_length = response.headers.get("Content-Length")
+                if content_length:
+                    try:
+                        if int(content_length) > MAX_FILE_SIZE:
+                            logger.warning(
+                                "Файл слишком большой: %d байт (лимит %d) для %s",
+                                int(content_length), MAX_FILE_SIZE, url,
+                            )
+                            return False
+                    except ValueError:
+                        pass
+
                 with tempfile.NamedTemporaryFile("wb", dir=parent_dir, delete=False) as file:
                     temp_path = file.name
+                    downloaded_size = 0
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             file.write(chunk)
+                            downloaded_size += len(chunk)
+                            # Защита от disk filling при отсутствии Content-Length
+                            if downloaded_size > MAX_FILE_SIZE:
+                                logger.warning(
+                                    "Превышен лимит размера файла: %d байт для %s",
+                                    downloaded_size, url,
+                                )
+                                raise OSError("Файл превышает лимит размера")
             os.replace(temp_path, full_path)
             return True
         except (requests.RequestException, OSError, ValueError) as error:
@@ -486,6 +543,13 @@ def _process_update(bot_token: str, update: dict[str, Any]) -> None:
         logger.warning("Пропущено обновление без корректного chat_id.")
         return
 
+    # Вайтлист chat_id (защита от спама)
+    # Если список пуст — принимаем от всех (backward compatibility)
+    allowed_chats = _get_allowed_chat_ids()
+    if allowed_chats and chat_id not in allowed_chats:
+        logger.warning("Отклонено сообщение от chat_id=%d (не в вайтлисте)", chat_id)
+        return
+
     text = body.get("text")
     note_id = None
     if isinstance(text, str) and text:
@@ -543,11 +607,33 @@ _running = False  # Флаг для graceful shutdown
 
 def _signal_handler(signum, frame):
     """Обработчик сигналов для graceful shutdown."""
+    global _running
     logger.info("Получен сигнал %d, завершение работы...", signum)
     _running = False
 
 def main():
-    global _running
+    global _running, _BOT_MUTEX_HANDLE
+
+    if sys.platform == "win32":
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_wchar_p,
+        ]
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        ctypes.set_last_error(0)
+        handle = kernel32.CreateMutexW(None, False, _BOT_MUTEX_NAME)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            logger.info("Другой экземпляр MAX-бота уже запущен.")
+            return
+        _BOT_MUTEX_HANDLE = handle
+
     _running = True
     
     # Настраиваем обработчики сигналов
@@ -557,6 +643,7 @@ def main():
     
     # Для Windows используем KeyboardInterrupt
     def windows_handler(sig, frame):
+        global _running
         logger.info("Получен сигнал прерывания, завершение работы...")
         _running = False
     
