@@ -1,7 +1,9 @@
+import logging
 import os
 import sqlite3
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from datetime import datetime
 
@@ -16,6 +18,12 @@ try:
     HAS_TRAY = True
 except ImportError:
     HAS_TRAY = False
+
+try:
+    from ui.file_watcher import create_file_watcher
+    HAS_FILE_WATCHER = True
+except ImportError:
+    HAS_FILE_WATCHER = False
 
 try:
     import ctypes
@@ -117,6 +125,9 @@ class NotesApp:
 
         self.root.after(2000, self.auto_refresh_inbox)
 
+        # Запустить событийное обновление вложений
+        self._start_inbox_watcher()
+
     def build_ui(self):
         self.notebook = ctk.CTkTabview(
             self.root, segmented_button_font=APP_FONT
@@ -137,32 +148,45 @@ class NotesApp:
         self.inbox_list = self.tab_max.inbox_list
         self.max_text = self.tab_max.max_text
 
+    def _on_inbox_change(self) -> None:
+        """Callback при изменении файлов в INBOX_DIR."""
+        try:
+            self.refresh_inbox()
+        except (OSError, sqlite3.Error, ValueError) as error:
+            logging.getLogger("main_window").error("Ошибка обновления inbox: %s", error)
+
+    def _start_inbox_watcher(self) -> None:
+        """Запустить файловый монитор для INBOX_DIR."""
+        if not HAS_FILE_WATCHER:
+            return
+        try:
+            if not os.path.isdir(INBOX_DIR):
+                os.makedirs(INBOX_DIR, exist_ok=True)
+            self._inbox_watcher = create_file_watcher(
+                INBOX_DIR, self._on_inbox_change, poll_interval=1.5
+            )
+        except Exception as e:
+            logging.getLogger("main_window").warning("Не удалось запустить файловый монитор: %s", e)
+
     def auto_refresh_inbox(self):
         try:
-            if os.path.exists(INBOX_DIR):
-                current_mtime = os.path.getmtime(INBOX_DIR)
-                if current_mtime > self._last_inbox_mtime:
-                    self._last_inbox_mtime = current_mtime
-                    self.refresh_inbox()
-
             current_signature = database_signature()
             if current_signature != self._last_db_signature:
                 self._last_db_signature = current_signature
                 self.refresh_list()
                 self.refresh_inbox()
         except (OSError, sqlite3.Error, ValueError) as error:
-            self._last_inbox_mtime = 0
             self._last_db_signature = None
             if not self._refresh_error_shown:
                 messagebox.showerror(
                     "Ошибка обновления",
-                    f"Не удалось обновить заметки или вложения: {error}",
+                    "Не удалось проверить изменения в заметках.",
                     parent=self.root,
                 )
                 self._refresh_error_shown = True
         else:
             self._refresh_error_shown = False
-        self.root.after(5000, self.auto_refresh_inbox)
+        self.root.after(15000, self.auto_refresh_inbox)
 
     def refresh_inbox(self):
         self.tab_max.refresh(get_inbox_attachments(), get_max_text_notes())
@@ -418,6 +442,10 @@ class NotesApp:
                 self.alert_job = self.root.after(100, self.show_next_alert)
 
     def on_close(self):
+        # Остановить файловый монитор
+        if hasattr(self, "_inbox_watcher") and self._inbox_watcher:
+            self._inbox_watcher.stop()
+        
         if HAS_TRAY and self.tray_icon is not None:
             self.tray_icon.stop()
         if self.on_close_callback is not None:

@@ -378,6 +378,20 @@ def get_max_text_notes() -> list[tuple]:
         return cursor.fetchall()
 
 
+def clear_max_text_notes() -> int:
+    """Удалить все заметки из MAX и вернуть количество удалённых записей.
+
+    Returns:
+        Количество удалённых записей.
+    """
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM notes WHERE title LIKE 'Заметка из MAX%'"
+        )
+        return cursor.rowcount
+
+
 def clear_attachments(inbox_dir: str) -> list[tuple]:
     """Удалить все записи вложений и вернуть удалённые пути.
 
