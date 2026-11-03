@@ -203,7 +203,6 @@ class NotesApp:
         ttk.Button(top, text="+ Добавить", command=self.open_add_dialog).pack(side="left", padx=2)
         ttk.Button(top, text="✎ Изменить", command=self.edit_selected).pack(side="left", padx=2)
         ttk.Button(top, text="✖ Удалить", command=self.delete_selected).pack(side="left", padx=2)
-        ttk.Button(top, text="Очистить", command=self.clear_past_events).pack(side="left", padx=2)
         ttk.Button(top, text="Свернуть", command=self.hide_window).pack(side="right", padx=2)
 
         list_frame = tk.Frame(self.tab_events, bg=BG_MAIN)
@@ -232,6 +231,7 @@ class NotesApp:
         top = ttk.Frame(self.tab_max, padding=6)
         top.pack(side="top", fill="x")
         ttk.Button(top, text="🔄 Обновить", command=self.refresh_inbox).pack(side="left")
+        ttk.Button(top, text="🗑 Очистить", command=self.clear_inbox_list).pack(side="left")
         ttk.Button(top, text="📂 Открыть папку", command=lambda: open_file(INBOX_DIR)).pack(side="left", padx=6)
 
         self.inbox_list = tk.Listbox(
@@ -309,6 +309,65 @@ class NotesApp:
         else:
             self.max_text.insert(tk.END, "Текстовых заметок из бота пока нет.")
         self.max_text.config(state="disabled")
+
+    def clear_inbox_list(self):
+        """Очищает список вложений из MAX: удаляет записи из БД и файлы с диска."""
+        if not messagebox.askyesno(
+            "Очистка вложений",
+            "Вы уверены, что хотите очистить список поступивших файлов?\n"
+            "Сами файлы будут удалены с диска.",
+            parent=self.root,
+        ):
+            return
+
+        deleted_count = 0
+        deleted_files = 0
+
+        with _connect_db() as conn:
+            cursor = conn.cursor()
+            # Получаем список файлов перед удалением
+            cursor.execute("SELECT file_path FROM attachments")
+            rows = cursor.fetchall()
+
+            if not rows:
+                messagebox.showinfo("Вложения", "Список вложений уже пуст.", parent=self.root)
+                return
+
+            # Удаляем физические файлы
+            for (file_path,) in rows:
+                full_path = os.path.join(INBOX_DIR, file_path)
+                try:
+                    if os.path.isfile(full_path):
+                        os.remove(full_path)
+                        deleted_files += 1
+                except PermissionError:
+                    messagebox.showwarning(
+                        "Внимание",
+                        f"Не удалось удалить файл:\n{os.path.basename(full_path)}\n"
+                        "Возможно, файл открыт в другой программе.",
+                        parent=self.root,
+                    )
+                except OSError as error:
+                    messagebox.showerror(
+                        "Ошибка",
+                        f"Не удалось удалить файл:\n{os.path.basename(full_path)}\n"
+                        f"Причина: {error}",
+                        parent=self.root,
+                    )
+
+            # Удаляем записи из БД
+            cursor.execute("DELETE FROM attachments")
+            conn.commit()
+
+        # Обновляем интерфейс
+        self.refresh_inbox()
+
+        messagebox.showinfo(
+            "Очищено",
+            f"Удалено записей в БД: {len(rows)}\n"
+            f"Удалено файлов с диска: {deleted_files}",
+            parent=self.root,
+        )
 
     def open_inbox_file(self, event):
         if event is not None and event.widget is not self.inbox_list:
