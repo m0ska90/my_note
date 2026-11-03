@@ -58,7 +58,7 @@ class EventsTab(ctk.CTkFrame):
             fg=FG_TEXT,
             selectbackground="#bcd6f0",
             selectforeground="#000000",
-            font=APP_FONT,
+            font=("Segoe UI", 14),
             yscrollcommand=scrollbar.set,
             relief="flat",
             highlightthickness=1,

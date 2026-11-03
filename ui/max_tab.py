@@ -17,20 +17,33 @@ class MaxTab(ctk.CTkFrame):
     def _build_ui(self):
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(side="top", fill="x")
+
+        action_row = ctk.CTkFrame(top, fg_color="transparent")
+        action_row.pack(side="top", anchor="w")
         ctk.CTkButton(
-            top, text="🔄 Обновить", command=self.main_app.refresh_inbox,
+            action_row,
+            text="🔄 Обновить",
+            command=self.main_app.refresh_inbox,
+            width=130,
             font=APP_FONT,
-        ).pack(side="left", padx=2, pady=6)
+        ).pack(side="left", padx=5, pady=6)
         ctk.CTkButton(
-            top, text="🗑 Очистить", command=self.main_app.clear_inbox_list,
+            action_row,
+            text="🗑 Очистить",
+            command=self.main_app.clear_inbox_list,
+            width=130,
             font=APP_FONT,
-        ).pack(side="left", padx=2, pady=6)
+        ).pack(side="left", padx=5, pady=6)
+
+        folder_row = ctk.CTkFrame(top, fg_color="transparent")
+        folder_row.pack(side="top", anchor="w")
         ctk.CTkButton(
-            top,
+            folder_row,
             text="📂 Открыть папку",
             command=lambda: self.main_app.open_file(INBOX_DIR),
+            width=170,
             font=APP_FONT,
-        ).pack(side="left", padx=6, pady=6)
+        ).pack(side="left", padx=5, pady=6)
 
         self.inbox_list = tk.Listbox(
             self,

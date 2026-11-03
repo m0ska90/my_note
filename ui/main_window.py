@@ -430,7 +430,32 @@ class NotesApp:
             self.alert_job = None
             return
         alert = self.pending_alerts[0]
-        messagebox.showwarning(alert["title"], alert["text"])
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(alert["title"])
+        dialog.geometry("420x200")
+        dialog.attributes("-topmost", True)
+        dialog.transient(self.root)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        ctk.CTkLabel(
+            dialog,
+            text=alert["text"],
+            font=APP_FONT,
+            wraplength=370,
+            justify="left",
+        ).pack(fill="both", expand=True, padx=20, pady=(20, 10))
+        ctk.CTkButton(
+            dialog,
+            text="ОК",
+            font=APP_FONT,
+            command=dialog.destroy,
+        ).pack(pady=(0, 15))
+
+        dialog.lift()
+        dialog.focus_force()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+
         alert["left"] -= 1
         if alert["left"] > 0:
             self.alert_job = self.root.after(10000, self.show_next_alert)

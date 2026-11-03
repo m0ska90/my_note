@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "agents": {
+    "bundled:devops-engineer": {
+      "fileName": "devops-engineer.md",
+      "marketplaceVersion": "0.1.0"
+    },
+    "bundled:product-manager": {
+      "fileName": "product-manager.md",
+      "marketplaceVersion": "0.1.0"
+    },
+    "bundled:tech-lead": {
+      "fileName": "tech-lead.md",
+      "marketplaceVersion": "0.1.0"
+    }
+  }
+}
