@@ -8,15 +8,19 @@ import sys
 import tempfile
 import time
 import sqlite3
-from collections.abc import Generator
-from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import requests
+
+from config import APP_DATA_DIR as APP_DIR, CERT_PATH, DB_FILE, INBOX_DIR, TOKEN_FILE
+from database import (
+    add_attachment,
+    add_max_text_note as add_text_note,
+    init_db,
+)
 
 # Настраиваем структурированное логирование
 logging.basicConfig(
@@ -32,11 +36,6 @@ if sys.platform == "win32":
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
 
-APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "MyNotesApp")
-DB_FILE = os.path.join(APP_DIR, "notes.db")
-INBOX_DIR = os.path.join(APP_DIR, "inbox")
-TOKEN_FILE = os.path.join(APP_DIR, "max_bot_token.dpapi")
-CERT_PATH = os.path.join(os.path.dirname(__file__), "combined_ca.pem")
 MAX_API_BASE_URL = "https://platform-api2.max.ru"
 MAX_API_MIN_INTERVAL = 1 / 30
 _last_api_request = 0.0
@@ -44,19 +43,6 @@ _last_api_request = 0.0
 # Настраиваем сертификаты
 if os.path.exists(CERT_PATH):
     os.environ["REQUESTS_CA_BUNDLE"] = CERT_PATH
-
-
-@contextmanager
-def _connect_db() -> Generator[sqlite3.Connection, None, None]:
-    os.makedirs(APP_DIR, exist_ok=True)
-    connection = sqlite3.connect(DB_FILE, timeout=10)
-    try:
-        connection.execute("PRAGMA busy_timeout = 10000")
-        connection.execute("PRAGMA foreign_keys = ON")
-        with connection:
-            yield connection
-    finally:
-        connection.close()
 
 
 # --- Шифрование токена (DPAPI) ---
@@ -118,52 +104,6 @@ def configure_token() -> None:
         raise ValueError("Токены не совпадают; сохранение отменено.")
     _save_token(token)
     logger.info("Токен зашифрован и сохранен: %s", TOKEN_FILE)
-
-# --- Работа с Базой Данных ---
-def init_db():
-    with _connect_db() as conn:
-        conn.execute("PRAGMA journal_mode = WAL")
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                description TEXT,
-                created_at TEXT,
-                remind_at TEXT,
-                status TEXT DEFAULT 'active'
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS attachments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                note_id INTEGER,
-                file_path TEXT,
-                file_type TEXT,
-                original_name TEXT,
-                FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
-            )
-        ''')
-        conn.commit()
-
-def add_text_note(text: str) -> int:
-    with _connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO notes (title, description, created_at, status)
-            VALUES (?, ?, ?, 'active')
-        ''', (f"Заметка из MAX: {text[:20]}...", text, datetime.now().isoformat(timespec="minutes")))
-        conn.commit()
-        return cursor.lastrowid
-
-def add_attachment(note_id: int, file_path: str, file_type: str, original_name: str):
-    with _connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO attachments (note_id, file_path, file_type, original_name)
-            VALUES (?, ?, ?, ?)
-        ''', (note_id, file_path, file_type, original_name))
-        conn.commit()
 
 def _attachment_path(url: str, prefix: str) -> str:
     """Формирует путь для сохранения вложения с определением типа файла.

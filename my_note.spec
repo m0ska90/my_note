@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['my_note.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
