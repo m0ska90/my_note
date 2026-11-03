@@ -1,5 +1,6 @@
+import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import sqlite3
 import os
 import sys
@@ -7,6 +8,9 @@ import subprocess
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+
+ctk.set_appearance_mode("Light")
+ctk.set_default_color_theme("blue")
 
 try:
     import pystray
@@ -51,8 +55,6 @@ BG_PANEL   = "#ffffff"
 BG_BUTTON  = "#e0e0e0"
 FG_TEXT    = "#090202"
 COLOR_DONE = "red"
-ALPHA      = 0.65
-
 HWND_BOTTOM    = 1
 SWP_NOSIZE     = 0x0001
 SWP_NOMOVE     = 0x0002
@@ -116,9 +118,9 @@ class NotesApp:
         self.root = root
         self.root.title("Заметки и MAX")
         self.root.geometry("420x600+{}+{}".format(root.winfo_screenwidth() - 440, 30))
-        self.root.configure(bg=BG_MAIN)
+        self.root.configure(fg_color=BG_MAIN)
 
-        self.root.attributes("-alpha", ALPHA)
+        self.root.attributes("-alpha", 1.0)
         self.root.attributes("-topmost", False)
 
         self.warned = {}
@@ -173,39 +175,27 @@ class NotesApp:
 
     # ---------------- UI ----------------
     def build_ui(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TFrame", background=BG_MAIN)
-        style.configure("TLabel", background=BG_MAIN, foreground=FG_TEXT)
-        style.configure("TButton", background=BG_BUTTON, foreground=FG_TEXT)
-        style.map("TButton", background=[("active", "#d0d0d0")])
-        style.configure("TNotebook", background=BG_MAIN, borderwidth=0)
-        style.configure("TNotebook.Tab", background=BG_BUTTON, padding=[10, 4])
-        style.map("TNotebook.Tab", background=[("selected", BG_PANEL)])
-
-        self.notebook = ttk.Notebook(self.root)
+        self.notebook = ctk.CTkTabview(self.root)
         self.notebook.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # --- Вкладка 1: События ---
-        self.tab_events = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_events, text="📅 События")
+        self.notebook.add("📅 События")
+        self.tab_events = self.notebook.tab("📅 События")
         self.build_events_tab()
 
-        # --- Вкладка 2: Из MAX ---
-        self.tab_max = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_max, text="📥 Из MAX")
+        self.notebook.add("📥 Из MAX")
+        self.tab_max = self.notebook.tab("📥 Из MAX")
         self.build_max_tab()
 
     def build_events_tab(self):
-        top = ttk.Frame(self.tab_events, padding=6)
+        top = ctk.CTkFrame(self.tab_events, fg_color="transparent")
         top.pack(side="top", fill="x")
 
-        ttk.Button(top, text="+ Добавить", command=self.open_add_dialog).pack(side="left", padx=2)
-        ttk.Button(top, text="✎ Изменить", command=self.edit_selected).pack(side="left", padx=2)
-        ttk.Button(top, text="✖ Удалить", command=self.delete_selected).pack(side="left", padx=2)
-        ttk.Button(top, text="Свернуть", command=self.hide_window).pack(side="right", padx=2)
+        ctk.CTkButton(top, text="+ Добавить", command=self.open_add_dialog).pack(side="left", padx=2, pady=6)
+        ctk.CTkButton(top, text="✎ Изменить", command=self.edit_selected).pack(side="left", padx=2, pady=6)
+        ctk.CTkButton(top, text="✖ Удалить", command=self.delete_selected).pack(side="left", padx=2, pady=6)
+        ctk.CTkButton(top, text="Свернуть", command=self.hide_window).pack(side="right", padx=2, pady=6)
 
-        list_frame = tk.Frame(self.tab_events, bg=BG_MAIN)
+        list_frame = ctk.CTkFrame(self.tab_events, fg_color="transparent")
         list_frame.pack(fill="both", expand=True, padx=6, pady=4)
 
         scrollbar = tk.Scrollbar(list_frame, orient="vertical")
@@ -221,18 +211,18 @@ class NotesApp:
         scrollbar.config(command=self.event_list.yview)
         self.event_list.bind("<<ListboxSelect>>", self.show_details)
 
-        self.desc = tk.Text(self.tab_events, height=6, bg=BG_PANEL, fg=FG_TEXT,
-                            insertbackground=FG_TEXT, wrap="word",
-                            relief="flat", highlightthickness=1, highlightbackground="#cccccc")
+        self.desc = ctk.CTkTextbox(self.tab_events, height=120, wrap="word")
         self.desc.pack(fill="x", padx=6, pady=(0, 6))
-        self.desc.config(state="disabled")
+        self.desc.configure(state="disabled")
 
     def build_max_tab(self):
-        top = ttk.Frame(self.tab_max, padding=6)
+        top = ctk.CTkFrame(self.tab_max, fg_color="transparent")
         top.pack(side="top", fill="x")
-        ttk.Button(top, text="🔄 Обновить", command=self.refresh_inbox).pack(side="left")
-        ttk.Button(top, text="🗑 Очистить", command=self.clear_inbox_list).pack(side="left")
-        ttk.Button(top, text="📂 Открыть папку", command=lambda: open_file(INBOX_DIR)).pack(side="left", padx=6)
+        ctk.CTkButton(top, text="🔄 Обновить", command=self.refresh_inbox).pack(side="left", padx=2, pady=6)
+        ctk.CTkButton(top, text="🗑 Очистить", command=self.clear_inbox_list).pack(side="left", padx=2, pady=6)
+        ctk.CTkButton(
+            top, text="📂 Открыть папку", command=lambda: open_file(INBOX_DIR)
+        ).pack(side="left", padx=6, pady=6)
 
         self.inbox_list = tk.Listbox(
             self.tab_max, bg=BG_PANEL, fg=FG_TEXT, selectbackground="#bcd6f0",
@@ -242,12 +232,10 @@ class NotesApp:
         self.inbox_list.bind("<Double-1>", self.open_inbox_file)
         self.inbox_files = []
 
-        tk.Label(self.tab_max, text="Текст заметки из бота:", bg=BG_MAIN, fg=FG_TEXT).pack(anchor="w", padx=6)
-        self.max_text = tk.Text(self.tab_max, height=6, bg=BG_PANEL, fg=FG_TEXT,
-                            insertbackground=FG_TEXT, wrap="word",
-                            relief="flat", highlightthickness=1, highlightbackground="#cccccc")
+        ctk.CTkLabel(self.tab_max, text="Текст заметки из бота:").pack(anchor="w", padx=6)
+        self.max_text = ctk.CTkTextbox(self.tab_max, height=120, wrap="word")
         self.max_text.pack(fill="x", padx=6, pady=(0, 6))
-        self.max_text.config(state="disabled")
+        self.max_text.configure(state="disabled")
 
     # ---------------- Логика вкладки MAX ----------------
     def auto_refresh_inbox(self):
@@ -300,7 +288,7 @@ class NotesApp:
             cursor.execute("SELECT created_at, description FROM notes WHERE title LIKE 'Заметка из MAX%' ORDER BY id DESC")
             max_notes = cursor.fetchall()
 
-        self.max_text.config(state="normal")
+        self.max_text.configure(state="normal")
         self.max_text.delete("1.0", "end")
         if max_notes:
             for created_at, description in max_notes:
@@ -308,7 +296,7 @@ class NotesApp:
                 self.max_text.insert(tk.END, f"[{dt.strftime('%d.%m %H:%M')}] {description}\n\n")
         else:
             self.max_text.insert(tk.END, "Текстовых заметок из бота пока нет.")
-        self.max_text.config(state="disabled")
+        self.max_text.configure(state="disabled")
 
     def clear_inbox_list(self):
         """Очищает список вложений из MAX: удаляет записи из БД и файлы с диска."""
@@ -389,12 +377,12 @@ class NotesApp:
         if event is not None and event.widget is not self.event_list:
             return
         sel = self.event_list.curselection()
-        self.desc.config(state="normal")
+        self.desc.configure(state="normal")
         self.desc.delete("1.0", "end")
         if sel:
             ev = self.sorted_events[sel[0]]
             self.desc.insert("1.0", ev[2] if ev[2] else "(нет описания)")
-        self.desc.config(state="disabled")
+        self.desc.configure(state="disabled")
 
     def refresh_list(self):
         self.event_list.delete(0, tk.END)
@@ -590,35 +578,35 @@ class NotesApp:
         self.root.destroy()
 
 
-class EventDialog(tk.Toplevel):
+class EventDialog(ctk.CTkToplevel):
     def __init__(self, parent, on_save, initial=None):
         super().__init__(parent)
         self.on_save = on_save
         self.title("Событие")
         self.geometry("340x330")
-        self.configure(bg=BG_MAIN)
+        self.configure(fg_color=BG_MAIN)
         self.attributes("-alpha", 1.0)
         self.resizable(False, False)
 
         pad = {"padx": 10, "pady": 4}
 
-        tk.Label(self, text="Название:", bg=BG_MAIN, fg=FG_TEXT).pack(anchor="w", **pad)
-        self.title_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT, insertbackground=FG_TEXT, relief="solid", bd=1)
+        ctk.CTkLabel(self, text="Название:").pack(anchor="w", **pad)
+        self.title_entry = ctk.CTkEntry(self)
         self.title_entry.pack(fill="x", padx=10)
 
-        tk.Label(self, text="Описание:", bg=BG_MAIN, fg=FG_TEXT).pack(anchor="w", **pad)
-        self.desc_text = tk.Text(self, height=4, wrap="word", bg=BG_PANEL, fg=FG_TEXT, insertbackground=FG_TEXT, relief="solid", bd=1)
+        ctk.CTkLabel(self, text="Описание:").pack(anchor="w", **pad)
+        self.desc_text = ctk.CTkTextbox(self, height=100, wrap="word")
         self.desc_text.pack(fill="x", padx=10)
 
-        tk.Label(self, text="Дата (ДД.ММ.ГГГГ):", bg=BG_MAIN, fg=FG_TEXT).pack(anchor="w", **pad)
-        self.date_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT, insertbackground=FG_TEXT, relief="solid", bd=1)
+        ctk.CTkLabel(self, text="Дата (ДД.ММ.ГГГГ):").pack(anchor="w", **pad)
+        self.date_entry = ctk.CTkEntry(self)
         self.date_entry.pack(fill="x", padx=10)
 
-        tk.Label(self, text="Время (ЧЧ:ММ):", bg=BG_MAIN, fg=FG_TEXT).pack(anchor="w", **pad)
-        self.time_entry = tk.Entry(self, bg=BG_PANEL, fg=FG_TEXT, insertbackground=FG_TEXT, relief="solid", bd=1)
+        ctk.CTkLabel(self, text="Время (ЧЧ:ММ):").pack(anchor="w", **pad)
+        self.time_entry = ctk.CTkEntry(self)
         self.time_entry.pack(fill="x", padx=10)
 
-        tk.Button(self, text="Сохранить", command=self.save, bg=BG_BUTTON, fg=FG_TEXT, relief="flat").pack(pady=10)
+        ctk.CTkButton(self, text="Сохранить", command=self.save).pack(pady=10)
 
         if initial:
             self.title_entry.insert(0, initial.get("title", ""))
@@ -674,11 +662,11 @@ def is_already_running():
 
 if __name__ == "__main__":
     if is_already_running():
-        root = tk.Tk()
+        root = ctk.CTk()
         root.withdraw()
         messagebox.showwarning("Заметки", "Программа уже запущена!")
         sys.exit(0)
 
-    root = tk.Tk()
+    root = ctk.CTk()
     app = NotesApp(root)
     root.mainloop()
