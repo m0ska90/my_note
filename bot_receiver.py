@@ -14,6 +14,11 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+# Добавляем корень проекта в sys.path для корректных импортов
+_project_root = os.path.dirname(os.path.abspath(__file__))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 import requests
 
 from config import APP_DATA_DIR as APP_DIR, CERT_PATH, DB_FILE, INBOX_DIR, TOKEN_FILE
@@ -233,17 +238,17 @@ def _detect_extension_by_content(file_path: str) -> str:
 
 def _fix_extension(file_path: str) -> str:
     """Исправляет расширение файла на основе его содержимого.
-    
+
     Если файл имеет .bin расширение но содержимое указывает на другой тип —
     переименовывает файл с правильным расширением.
     """
     if not file_path.lower().endswith(".bin"):
         return file_path
-    
+
     detected = _detect_extension_by_content(file_path)
     if detected == ".bin":
         return file_path
-    
+
     # Переименовываем файл
     new_path = file_path.rsplit(".", 1)[0] + detected
     try:
@@ -256,18 +261,6 @@ def _fix_extension(file_path: str) -> str:
     except OSError as e:
         logger.warning("Не удалось переименовать файл: %s", e)
         return file_path
-
-# --- Константы ---
-MAX_API_BASE_URL = "https://platform-api2.max.ru"
-MAX_API_MIN_INTERVAL = 1 / 30
-_last_api_request = 0.0
-
-# Максимальный размер вложения: 100 МБ
-MAX_FILE_SIZE = 100 * 1024 * 1024
-
-# Настраиваем сертификаты
-if os.path.exists(CERT_PATH):
-    os.environ["REQUESTS_CA_BUNDLE"] = CERT_PATH
 
 
 def _wait_for_api_slot() -> None:

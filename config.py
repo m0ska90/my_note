@@ -1,5 +1,10 @@
+import logging
 import os
 
+# Настраиваем логирование при загрузке конфига
+logger = logging.getLogger("config")
+
+logger.debug("Загружен конфиг: APP_DATA_DIR=%s", os.environ.get("APPDATA", "Not set"))
 
 APP_DATA_DIR = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")),

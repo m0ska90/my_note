@@ -19,12 +19,12 @@ env/
 ENV/
 
 # SSH keys — never commit
-y
-y.pub
 *.pem
 *.key
 id_rsa
+id_rsa.pub
 id_ed25519
+id_ed25519.pub
 
 # ===== 测试与覆盖率 =====
 .pytest_cache/
