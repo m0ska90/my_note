@@ -44,6 +44,7 @@ if sys.platform == "win32":
 
 MAX_API_BASE_URL = "https://platform-api2.max.ru"
 MAX_API_MIN_INTERVAL = 1 / 30
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ — лимит на размер вложения
 _last_api_request = 0.0
 _BOT_MUTEX_NAME = "Local\\MyNoteMaxBotReceiver"
 _BOT_MUTEX_HANDLE = None

@@ -113,10 +113,15 @@ class EventDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self.on_save = on_save
         self.title("Событие")
-        self.geometry("340x380")
+        self.geometry("340x420")
         self.configure(fg_color=BG_MAIN)
         self.attributes("-alpha", 1.0)
         self.resizable(False, False)
+
+        # Привязываем диалог к главному окну — предотвращает прятанье за все окна
+        self.transient(parent)
+        self.grab_set()
+        self.lift()
 
         pad = {"padx": 10, "pady": 4}
         ctk.CTkLabel(self, text="Название:", font=APP_FONT).pack(anchor="w", **pad)
