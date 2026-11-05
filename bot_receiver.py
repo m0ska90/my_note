@@ -157,111 +157,131 @@ def _attachment_path(url: str, prefix: str) -> str:
 
 
 # Magic bytes для определения типов файлов
-_MAGIC_SIGNATURES = {
-    b"\xff\xd8\xff": ".jpg",
-    b"\x89PNG\r\n\x1a\n": ".png",
-    b"GIF87a": ".gif",
-    b"GIF89a": ".gif",
-    b"RIFF": None,  # WebP — проверяем дальше
-    b"WEBP": ".webp",
-    b"%PDF": ".pdf",
-    b"\x1f\x8b": ".gz",
-    b"PK\x03\x04": ".zip",  # также .docx, .xlsx, .pptx
-    b"\xd0\xcf": ".doc",  # Microsoft Office
-    b"\x00\x00\x01\x00": ".ico",
-    b"\x00\x00\x00\x18\x66\x74\x79\x70\x68\x65\x63": ".heic",
-}
+# Порядок важен — более специфичные сигнатуры должны идти раньше
+_MAGIC_SIGNATURES = [
+    (b"\x89PNG\r\n\x1a\n", ".png"),  # 8 байт
+    (b"\xff\xd8\xff", ".jpg"),  # 3 байта
+    (b"GIF87a", ".gif"),  # 6 байт
+    (b"GIF89a", ".gif"),  # 6 байт
+    (b"%PDF", ".pdf"),  # 4 байта
+    (b"\x1f\x8b", ".gz"),  # 2 байта
+    (b"PK\x03\x04", ".zip"),  # 4 байта (docx, xlsx, pptx тоже ZIP)
+    (b"\xd0\xcf", ".doc"),  # 2 байта (Microsoft Office)
+    (b"\x00\x00\x01\x00", ".ico"),  # 4 байта
+    (b"\x00\x00\x00\x18\x66\x74\x79\x70\x68\x65\x63", ".heic"),  # 18 байт
+    (b"\x42\x4d", ".bmp"),  # 2 байта
+    (b"\x49\x49\x2a\x00", ".tiff"),  # 4 байта (big-endian)
+    (b"\x49\x49", ".tif"),  # 2 байта (little-endian, fallback)
+]
 
-_AUDIO_MAGIC = {
-    b"\xff\xfb": ".mp3",
-    b"ID3": ".mp3",
-    b"\x4f\x72\x67\x61": ".ogg",
-    b"FLaC": ".flac",
-    b"\x52\x49\x46\x46": None,  # wav — проверяем дальше
-    b"WEB": ".weba",
-}
+_AUDIO_MAGIC = [
+    (b"\xff\xfb", ".mp3"),  # 2 байта
+    (b"ID3", ".mp3"),  # 3 байта
+    (b"\x4f\x72\x67\x61", ".ogg"),  # 7 байт
+    (b" FLAC", ".flac"),  # 5 байт (FLAC имеет пробел перед)
+    (b"WEB", ".weba"),  # 3 байта
+    (b"\x00\x00\x00\x14\x66\x74\x79\x70\x4d\x50\x34\x41", ".m4a"),  # 12 байт
+]
 
-_VIDEO_MAGIC = {
-    b"\x00\x00\x00\x18\x66\x74\x79\x70\x69\x73\x6f\x6d": ".mp4",
-    b"\x00\x00\x00\x1c\x66\x74\x79\x70\x6d\x70\x34\x32": ".mp4",
-    b"\x00\x00\x00\x14\x66\x74\x79\x70\x4d\x53\x4e\x56": ".mp4",
-    b"\x00\x00\x00\x14\x66\x74\x79\x70\x69\x73\x6f\x6d": ".mp4",
-    b"\x1a\x45\xdf\xa3": ".mkv",
-    b"\x00\x00\x01\xb3": ".mpg",
-    b"\x00\x00\x01\xb6": ".mpg",
-    b"\x47\x49\x46": ".gif",  # animated gif
-}
+_VIDEO_MAGIC = [
+    (b"\x00\x00\x00\x18\x66\x74\x79\x70\x69\x73\x6f\x6d", ".mp4"),  # 12 байт
+    (b"\x00\x00\x00\x1c\x66\x74\x79\x70\x6d\x70\x34\x32", ".mp4"),  # 12 байт
+    (b"\x00\x00\x00\x14\x66\x74\x79\x70\x4d\x53\x4e\x56", ".mp4"),  # 12 байт
+    (b"\x00\x00\x00\x14\x66\x74\x79\x70\x69\x73\x6f\x6d", ".mp4"),  # 12 байт
+    (b"\x1a\x45\xdf\xa3", ".mkv"),  # 4 байта
+    (b"\x00\x00\x01\xb3", ".mpg"),  # 4 байта
+    (b"\x00\x00\x01\xb6", ".mpg"),  # 4 байта
+    (b"\x47\x49\x46", ".gif"),  # 3 байта (animated gif)
+    (b"\x00\x00\x00\x1c\x66\x74\x79\x70\x6d\x76\x6b\x32", ".mkv"),  # 12 байт
+    (b"\x00\x00\x00\x18\x66\x74\x79\x70\x33\x67\x70\x35", ".mp4"),  # 12 байт (HEVC)
+]
 
 
 def _detect_extension_by_content(file_path: str) -> str:
     """Определяет расширение файла по magic bytes содержимого.
-    
+
     Возвращает корректное расширение или ".bin" если тип не определён.
     """
     try:
         with open(file_path, "rb") as f:
-            header = f.read(16)
+            header = f.read(32)  # Читаем больше байт для длинных сигнатур
     except (OSError, IOError):
         return ".bin"
-    
+
     if not header:
         return ".bin"
-    
-    # Проверяем signatures
-    for magic, ext in _MAGIC_SIGNATURES.items():
-        if header.startswith(magic):
-            if ext is None:
-                # Нужна дополнительная проверка
-                if magic == b"RIFF" and len(header) >= 12:
-                    if header[8:12] == b"WEBP":
-                        return ".webp"
-                    if header[8:12] == b"AWAV":
-                        return ".wav"
-            else:
+
+    def _match_any(sig_list: list[tuple[bytes, str]]) -> str | None:
+        """Проверяет список сигнатур — возвращает первое совпадение или None."""
+        for magic, ext in sig_list:
+            if header.startswith(magic):
                 return ext
-    
-    # Проверяем аудио
-    for magic, ext in _AUDIO_MAGIC.items():
-        if header.startswith(magic):
-            if ext is None and magic == b"\x52\x49\x46\x46":
-                if len(header) >= 12 and header[8:12] == b"AWAV":
-                    return ".wav"
-            else:
-                return ext if ext else ".bin"
-    
-    # Проверяем видео
-    for magic, ext in _VIDEO_MAGIC.items():
-        if header.startswith(magic):
-            return ext
-    
+        return None
+
+    # 1. Простые сигнатуры (jpg, png, gif, pdf, bmp, tiff, heic и т.д.)
+    ext = _match_any(_MAGIC_SIGNATURES)
+    if ext:
+        return ext
+
+    # 2. RIFF-контейнеры (WebP, WAV, AVI, MOV и т.д.)
+    if header.startswith(b"RIFF") and len(header) >= 12:
+        container = header[8:12]
+        if container == b"WEBP":
+            return ".webp"
+        elif container == b"AWAV":
+            return ".wav"
+        elif container == b"AVI ":
+            return ".avi"
+        elif container == b"flv ":
+            return ".flv"
+        elif container == b"mov ":
+            return ".mov"
+
+    # 3. MP4/видео сигнатуры (ftyp box)
+    ext = _match_any(_VIDEO_MAGIC)
+    if ext:
+        return ext
+
+    # 4. Аудио-сигнатуры (mp3, ogg, flac, m4a)
+    ext = _match_any(_AUDIO_MAGIC)
+    if ext:
+        return ext
+
     return ".bin"
 
 
 def _fix_extension(file_path: str) -> str:
     """Исправляет расширение файла на основе его содержимого.
 
-    Если файл имеет .bin расширение но содержимое указывает на другой тип —
-    переименовывает файл с правильным расширением.
+    Если файл имеет .bin расширение или не имеет расширения вообще —
+    определяет тип по magic bytes и переименовывает с правильным расширением.
     """
-    if not file_path.lower().endswith(".bin"):
-        return file_path
-
-    detected = _detect_extension_by_content(file_path)
-    if detected == ".bin":
-        return file_path
+    detected = None
+    if file_path.lower().endswith(".bin"):
+        detected = _detect_extension_by_content(file_path)
+        if detected == ".bin":
+            return file_path
+    elif "." not in os.path.basename(file_path):
+        # Файл без расширения — определяем по содержимому
+        detected = _detect_extension_by_content(file_path)
+        if detected == ".bin":
+            return file_path
 
     # Переименовываем файл
-    new_path = file_path.rsplit(".", 1)[0] + detected
-    try:
-        if os.path.exists(new_path):
-            # Если файл с таким именем уже есть — добавляем UUID
-            new_path = file_path.rsplit(".", 1)[0] + f"_{uuid4().hex[:8]}" + detected
-        os.rename(file_path, new_path)
-        logger.debug("Исправлено расширение: %s → %s", file_path, os.path.basename(new_path))
-        return new_path
-    except OSError as e:
-        logger.warning("Не удалось переименовать файл: %s", e)
-        return file_path
+    if detected:
+        base = os.path.splitext(file_path)[0]
+        new_path = base + detected
+        try:
+            if os.path.exists(new_path):
+                # Если файл с таким именем уже есть — добавляем UUID
+                new_path = base + f"_{uuid4().hex[:8]}" + detected
+            os.rename(file_path, new_path)
+            logger.debug("Исправлено расширение: %s → %s", file_path, os.path.basename(new_path))
+            return new_path
+        except OSError as e:
+            logger.warning("Не удалось переименовать файл: %s", e)
+            return file_path
+    return file_path
 
 
 def _wait_for_api_slot() -> None:

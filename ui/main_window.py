@@ -93,6 +93,21 @@ def open_file(path):
         subprocess.call([opener, path])
 
 
+def _find_file_with_extension(path: str) -> str | None:
+    """Если файл не найден — ищем в inbox с распространённым расширением."""
+    if os.path.isfile(path):
+        return path
+    inbox_dir = os.path.join(APP_DATA_DIR, "inbox")
+    basename = os.path.basename(path)
+    for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic",
+                ".mp4", ".mov", ".avi", ".mp3", ".ogg", ".flac", ".pdf",
+                ".doc", ".docx", ".xls", ".xlsx", ".zip", ".gz"):
+        candidate = os.path.join(inbox_dir, basename + ext)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 class NotesApp:
     open_file = staticmethod(open_file)
 
@@ -147,6 +162,20 @@ class NotesApp:
         self.max_tab = self.tab_max
         self.inbox_list = self.tab_max.inbox_list
         self.max_text = self.tab_max.max_text
+
+        # Отложенные draw-события CustomTkinter при обновлении виджетов
+        # (destroy + recreate) срабатывают на уже удалённых canvas и
+        # вызывают TclError. Это известное поведение CTk. Подавляем ошибки,
+        # но оставляем traceback в stderr для отладки настоящих проблем.
+        self._ignore_tcl_errors = False
+
+    def _handle_tcl_error(self, exc, val, tb):
+        """Перехват ошибок callback-ов. Игнорируем TclError при перерисовке."""
+        if isinstance(exc, tk.TclError) and self._ignore_tcl_errors:
+            return  # игнорируем
+        import traceback
+        sys.stderr.write(f"Exception in Tkinter callback\n")
+        sys.stderr.write(''.join(traceback.format_exception(exc, val, tb)))
 
     def _on_inbox_change(self) -> None:
         """Callback при изменении файлов в INBOX_DIR."""
@@ -258,7 +287,8 @@ class NotesApp:
                 "Ошибка", "Недопустимый путь к вложению.", parent=self.root
             )
             return
-        if os.path.isfile(filepath):
+        filepath = _find_file_with_extension(filepath)
+        if filepath and os.path.isfile(filepath):
             open_file(filepath)
         else:
             messagebox.showerror(
@@ -445,7 +475,7 @@ class NotesApp:
         # Остановить файловый монитор
         if hasattr(self, "_inbox_watcher") and self._inbox_watcher:
             self._inbox_watcher.stop()
-        
+
         if HAS_TRAY and self.tray_icon is not None:
             self.tray_icon.stop()
         if self.on_close_callback is not None:

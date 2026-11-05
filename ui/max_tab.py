@@ -123,7 +123,10 @@ class MaxTab(ctk.CTkFrame):
 
         # Очищаем карточки
         for widget in self.max_text.winfo_children():
-            widget.destroy()
+            try:
+                widget.destroy()
+            except tk.TclError:
+                pass  # виджет уже удалён или недоступен
         self.all_cards = []
         self.selected_card = None
 

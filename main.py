@@ -10,6 +10,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 import customtkinter as ctk
+import tkinter as tk
 from ctypes import wintypes
 from tkinter import messagebox
 
@@ -213,6 +214,19 @@ def main():
 
     init_db()
     root = ctk.CTk()
+    
+    # Подавляем TclError от CustomTkinter при перерисовке виджетов —
+    # при удалении/создании карточек отложенные draw-события CTk
+    # срабатывают на уже удалённых canvas. Это известное поведение.
+    def _suppress_ctk_errors(exc_type, exc_val, exc_tb):
+        if exc_type is tk.TclError:
+            return  # игнорируем TclError от CTk
+        # Выводим остальные ошибки в stderr
+        import traceback
+        sys.stderr.write(f"Exception in Tkinter callback\n")
+        sys.stderr.write(''.join(traceback.format_exception(exc_type, exc_val, exc_tb)))
+    root.report_callback_exception = _suppress_ctk_errors
+    
     NotesApp(root, on_close_callback=_stop_bot)
     _start_bot(root)
     root.mainloop()
