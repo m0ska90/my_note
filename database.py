@@ -55,7 +55,7 @@ def _connect_db() -> Generator[sqlite3.Connection, None, None]:
     if _HAS_SQLCIPHER:
         connection = sqlite3.connect(DB_FILE, timeout=10)
         try:
-            connection.execute(f"PRAGMA key = '{password}'")
+            connection.execute("PRAGMA key = ?", (password,))
             connection.execute("PRAGMA busy_timeout = 10000")
             connection.execute("PRAGMA foreign_keys = ON")
             # Проверка что ключ верный
@@ -202,7 +202,7 @@ def migrate_from_plaintext(password: str | None = None) -> bool:
 
         # Открываем новую БД с шифрованием
         encrypted_conn = sqlcipher.connect(DB_FILE, timeout=10)
-        encrypted_conn.execute(f"PRAGMA key = '{password}'")
+        encrypted_conn.execute("PRAGMA key = ?", (password,))
         encrypted_conn.execute("PRAGMA journal_mode = WAL")
         encrypted_conn.execute("PRAGMA foreign_keys = ON")
 

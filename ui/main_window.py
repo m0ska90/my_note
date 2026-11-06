@@ -116,7 +116,7 @@ class NotesApp:
     def __init__(self, root, on_close_callback: Callable[[], None] | None = None):
         self.root = root
         self.on_close_callback = on_close_callback
-        self.root.title("Заметки и MAX")
+        self.root.title("Заказики и MAX")
         self.root.configure(fg_color=BG_MAIN)
         self.root.attributes("-alpha", 1.0)
         self.root.attributes("-topmost", False)
@@ -142,11 +142,29 @@ class NotesApp:
         # Запустить событийное обновление вложений
         self._start_inbox_watcher()
 
+        # Запускаем мониторинг переключения вкладок (CTkTabview не поддерживает <<NotebookTabChanged>>)
+        self._last_active_tab = ""
+        self._tab_check_job = None
+        self._check_tab_switch()
+
         # Разворачиваем на весь экран ПОСЛЕ сборки UI
         if IS_WINDOWS:
             self.root.state('zoomed')
         else:
             self.root.attributes('-zoomed', True)
+
+    def _check_tab_switch(self):
+        """Проверяем текущую активную вкладку каждые 2 секунды."""
+        try:
+            current_tab = self.notebook.cget("value")
+            if current_tab != self._last_active_tab:
+                self._last_active_tab = current_tab
+                if "Заказы" in (current_tab or ""):
+                    if hasattr(self, "orders_tab") and self.orders_tab:
+                        self.orders_tab.refresh()
+        except Exception:
+            pass
+        self._tab_check_job = self.root.after(2000, self._check_tab_switch)
 
     def build_ui(self):
         self.notebook = ctk.CTkTabview(
@@ -488,6 +506,14 @@ class NotesApp:
                 self.alert_job = self.root.after(100, self.show_next_alert)
 
     def on_close(self):
+        # Остановить автообновление заказов
+        if hasattr(self, "orders_tab") and self.orders_tab:
+            self.orders_tab.stop_auto_refresh()
+
+        # Остановить мониторинг переключения вкладок
+        if hasattr(self, "_tab_check_job") and self._tab_check_job:
+            self.root.after_cancel(self._tab_check_job)
+
         # Остановить файловый монитор
         if hasattr(self, "_inbox_watcher") and self._inbox_watcher:
             self._inbox_watcher.stop()

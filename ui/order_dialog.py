@@ -183,8 +183,13 @@ class OrderDialog(ctk.CTkToplevel):
         self.customer_entry.focus_set()
 
     def _is_digits_or_empty(self, value: str) -> bool:
-        """Разрешает только цифры."""
-        return all("0" <= ch <= "9" for ch in value)
+        """Разрешает цифры, точку и запятую (для дробных чисел)."""
+        if not value:
+            return True  # пустое поле допустимо
+        dot_count = value.count('.') + value.count(',')
+        if dot_count > 1:
+            return False  # не более одного разделителя
+        return all("0" <= ch <= "9" or ch in ".," for ch in value)
 
     def _load_gcode(self) -> None:
         """Открывает диалог выбора G-code файла и парсит его."""

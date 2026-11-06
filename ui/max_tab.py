@@ -86,7 +86,7 @@ class MaxTab(ctk.CTkFrame):
         )
         self.inbox_list.pack(fill="x", padx=6, pady=4)
 
-        # --- Блок: Текст заметки из бота ---
+        # --- Блок: Текст заказа из MAX ---
         self._build_max_notes_ui()
 
     def _build_max_notes_ui(self):
@@ -99,7 +99,7 @@ class MaxTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header_frame,
-            text="Текст заметки из бота:",
+            text="Текст заказа из MAX:",
             font=APP_FONT,
             anchor="w",
         ).pack(side="left", fill="x", expand=True)

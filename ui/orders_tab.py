@@ -16,7 +16,12 @@ class OrdersTab(ctk.CTkFrame):
         super().__init__(parent, fg_color=BG_MAIN)
         self.main_app = main_app
         self.orders: list[tuple] = []  # Все строки orders из БД
+        self.refresh_job = None
         self._build_ui()
+        # Загружаем данные при создании вкладки
+        self.refresh()
+        # Запускаем автообновление каждые 30 секунд
+        self.auto_refresh()
 
     # ------------------------------------------------------------------ #
     # UI
@@ -232,4 +237,30 @@ class OrdersTab(ctk.CTkFrame):
             font=APP_FONT,
             command=dialog.destroy,
         ).pack(pady=(0, 15))
+
+    # --------------------------------------------------------------- #
+    # Автообновление
+    # --------------------------------------------------------------- #
+    def auto_refresh(self) -> None:
+        """Периодически обновлять данные из БД."""
+        # Сначала отменяем старый таймер, если он есть
+        if self.refresh_job is not None:
+            self.main_app.root.after_cancel(self.refresh_job)
+        # Планируем следующее обновление через 30 секунд
+        self.refresh_job = self.main_app.root.after(
+            30000, self._auto_refresh_callback
+        )
+
+    def _auto_refresh_callback(self) -> None:
+        """Вызывается таймером для обновления данных."""
+        self.refresh_job = None
+        self.refresh()
+        # Запускаем следующий цикл
+        self.auto_refresh()
+
+    def stop_auto_refresh(self) -> None:
+        """Останавливает автообновление (вызывать при закрытии приложения)."""
+        if self.refresh_job is not None:
+            self.main_app.root.after_cancel(self.refresh_job)
+            self.refresh_job = None
 
