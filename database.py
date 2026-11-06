@@ -111,6 +111,21 @@ def init_db() -> None:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders (
+                    id INTEGER PRIMARY KEY,
+                    customer_name TEXT,
+                    deadline TEXT,
+                    file_path TEXT,
+                    weight_grams REAL,
+                    print_time_hours REAL,
+                    material_type TEXT,
+                    extra_services REAL,
+                    total_price REAL
+                )
+                """
+            )
             # Индексы для производительности
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_notes_remind_at ON notes(remind_at)"
@@ -337,6 +352,57 @@ def update_event(note_id: int, title: str, description: str, remind_at: str) -> 
 def delete_event(note_id: int) -> None:
     with _connect_db() as conn:
         conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+
+
+def add_order(
+    customer_name: str,
+    deadline: str,
+    file_path: str,
+    weight_grams: float,
+    print_time_hours: float,
+    material_type: str,
+    extra_services: float,
+    total_price: float,
+) -> None:
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO orders (
+                customer_name, deadline, file_path, weight_grams,
+                print_time_hours, material_type, extra_services, total_price
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                customer_name,
+                deadline,
+                file_path,
+                weight_grams,
+                print_time_hours,
+                material_type,
+                extra_services,
+                total_price,
+            ),
+        )
+
+
+def get_all_orders() -> list[tuple]:
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, customer_name, deadline, file_path, weight_grams,
+                   print_time_hours, material_type, extra_services, total_price
+            FROM orders
+            ORDER BY deadline
+            """
+        )
+        return cursor.fetchall()
+
+
+def delete_order(order_id: int) -> None:
+    with _connect_db() as conn:
+        conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
 
 
 def delete_past_events(now: str) -> None:

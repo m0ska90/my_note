@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(c:\\users\\ilya\\python_project\\my_note\\.venv\\scripts\\python.exe *)"
     ]
   },
   "$version": 3

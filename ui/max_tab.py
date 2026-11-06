@@ -5,15 +5,15 @@ import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox
 
-from config import APP_FONT, BG_PANEL, FG_TEXT, INBOX_DIR
+from config import APP_FONT, BG_PANEL, INBOX_DIR
 from database import clear_max_text_notes
+from ui.order_dialog import OrderDialog
 
 
 class MaxTab(ctk.CTkFrame):
     def __init__(self, parent, main_app):
         super().__init__(parent, fg_color="transparent")
         self.main_app = main_app
-        self.inbox_files = []
         self.selected_card: ctk.CTkFrame | None = None
         self.all_cards: list[ctk.CTkFrame] = []  # Список всех карточек
         self._build_ui()
@@ -44,6 +44,14 @@ class MaxTab(ctk.CTkFrame):
         ).pack(side="left", padx=5, pady=6)
         ctk.CTkButton(
             action_row,
+            text="📦 Оформить заказ",
+            command=self._open_order_dialog,
+            width=180,
+            height=45,
+            font=APP_FONT,
+        ).pack(side="left", padx=5, pady=6)
+        ctk.CTkButton(
+            action_row,
             text="➡ В события",
             command=self._open_add_event_from_selected,
             width=180,
@@ -62,18 +70,21 @@ class MaxTab(ctk.CTkFrame):
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)
 
-        self.inbox_list = tk.Listbox(
+        attachments_header = ctk.CTkLabel(
             self,
-            bg=BG_PANEL,
-            fg=FG_TEXT,
-            selectbackground="#bcd6f0",
+            text="Файлы из MAX:",
             font=APP_FONT,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#cccccc",
+            anchor="w",
         )
-        self.inbox_list.pack(fill="both", expand=True, padx=6, pady=4)
-        self.inbox_list.bind("<Double-1>", self.main_app.open_inbox_file)
+        attachments_header.pack(fill="x", padx=6, pady=(4, 0))
+        self.inbox_list = ctk.CTkScrollableFrame(
+            self,
+            height=130,
+            corner_radius=8,
+            border_width=1,
+            border_color="#cccccc",
+        )
+        self.inbox_list.pack(fill="x", padx=6, pady=4)
 
         # --- Блок: Текст заметки из бота ---
         self._build_max_notes_ui()
@@ -104,7 +115,6 @@ class MaxTab(ctk.CTkFrame):
         # Скроллируемая область с карточками
         self.max_text = ctk.CTkScrollableFrame(
             self,
-            width=420,
             height=250,
             corner_radius=8,
             border_width=1,
@@ -113,13 +123,10 @@ class MaxTab(ctk.CTkFrame):
         self.max_text.pack(fill="both", expand=True, **pad)
 
     def refresh(self, attachments, max_notes):
-        self.inbox_list.delete(0, tk.END)
-        self.inbox_files = []
+        for widget in self.inbox_list.winfo_children():
+            widget.destroy()
         for file_path, original_name, note_title in attachments:
-            self.inbox_list.insert(
-                tk.END, f"📎 {original_name} (к: {note_title})"
-            )
-            self.inbox_files.append(file_path)
+            self._create_attachment_card(file_path, original_name, note_title)
 
         # Очищаем карточки
         for widget in self.max_text.winfo_children():
@@ -144,6 +151,26 @@ class MaxTab(ctk.CTkFrame):
             card = self._create_note_card(dt, description, i)
             self.all_cards.append(card)
 
+    def _create_attachment_card(
+        self, file_path: str, original_name: str, note_title: str
+    ) -> None:
+        card = ctk.CTkFrame(self.inbox_list, corner_radius=8, fg_color=BG_PANEL)
+        card.pack(fill="x", padx=4, pady=3)
+
+        ctk.CTkLabel(
+            card,
+            text=f"📎 {original_name} (к: {note_title})",
+            font=("Segoe UI", 13),
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True, padx=8, pady=6)
+
+        ctk.CTkButton(
+            card,
+            text="Открыть",
+            width=75,
+            command=lambda path=file_path: self.main_app.open_inbox_file(path),
+        ).pack(side="right", padx=(4, 6), pady=4)
+
     def _create_note_card(self, dt: datetime, text: str, index: int) -> ctk.CTkFrame:
         """Создать карточку для одной текстовой заметки."""
         card = ctk.CTkFrame(
@@ -158,36 +185,40 @@ class MaxTab(ctk.CTkFrame):
         # Сохраняем текст в атрибут карточки
         card.note_text = text
 
-        # Создаём все дочерние элементы с крупным шрифтом
+        # Создаём все дочерние элементы с крупным шрифтом, прижаты к левому краю
         time_label = self._create_child_label(
             card,
             text=f"📅  {dt.strftime('%d.%m.%Y  %H:%M:%S')}",
             font=("Segoe UI", 16),  # Увеличено для читаемости
             text_color="#888888",
+            anchor="w",
         )
-        time_label.pack(anchor="w", padx=10, pady=(8, 0))
+        time_label.pack(fill="x", padx=4, pady=(8, 0))
 
         # Разделитель
         divider = self._create_child_frame(
             card, height=1, fg_color="#e8e8e8"
         )
-        divider.pack(fill="x", padx=10, pady=(4, 0))
+        divider.pack(fill="x", padx=4, pady=(4, 0))
 
-        # Текст заметки — крупный шрифт
+        # Текст заметки — крупный шрифт, на всю ширину карточки, прижат к левому краю
         content_label = self._create_child_label(
             card,
             text=text,
             font=("Segoe UI", 20),  # Увеличено для читаемости
             justify="left",
-            wraplength=380,
+            anchor="w",
         )
-        content_label.pack(anchor="w", padx=10, pady=(4, 8))
+        content_label.pack(fill="x", padx=4, pady=(4, 8))
 
         # Привязываем события мыши КО ВСЕМ внутренним элементам
         # Чтобы клик по тексту тоже считался кликом по карточке
         self._bind_card_events(card, text)
 
         return card
+
+    def _open_order_dialog(self, file_path: str = "") -> None:
+        OrderDialog(self.main_app.root, file_path=file_path)
 
     def _bind_card_events(self, card: ctk.CTkFrame, text: str) -> None:
         """Привязать события мыши ко всем элементам карточки.

@@ -56,6 +56,7 @@ from database import (
     delete_event as db_delete_event,
     delete_past_events,
     get_all_events,
+    get_all_orders,
     get_event,
     get_inbox_attachments,
     get_max_text_notes,
@@ -63,6 +64,7 @@ from database import (
     update_event as db_update_event,
 )
 from ui.events_tab import EventDialog, EventsTab
+from ui.orders_tab import OrdersTab
 from ui.max_tab import MaxTab
 
 ctk.set_appearance_mode("Light")
@@ -115,9 +117,6 @@ class NotesApp:
         self.root = root
         self.on_close_callback = on_close_callback
         self.root.title("Заметки и MAX")
-        self.root.geometry(
-            "420x600+{}+{}".format(root.winfo_screenwidth() - 440, 30)
-        )
         self.root.configure(fg_color=BG_MAIN)
         self.root.attributes("-alpha", 1.0)
         self.root.attributes("-topmost", False)
@@ -143,6 +142,12 @@ class NotesApp:
         # Запустить событийное обновление вложений
         self._start_inbox_watcher()
 
+        # Разворачиваем на весь экран ПОСЛЕ сборки UI
+        if IS_WINDOWS:
+            self.root.state('zoomed')
+        else:
+            self.root.attributes('-zoomed', True)
+
     def build_ui(self):
         self.notebook = ctk.CTkTabview(
             self.root, segmented_button_font=APP_FONT
@@ -155,6 +160,11 @@ class NotesApp:
         self.events_tab = self.tab_events
         self.event_list = self.tab_events.event_list
         self.desc = self.tab_events.desc
+
+        self.notebook.add("📦 Заказы")
+        self.orders_tab = OrdersTab(self.notebook.tab("📦 Заказы"), self)
+        self.orders_tab.pack(fill="both", expand=True)
+        self.tree_orders = self.orders_tab.tree
 
         self.notebook.add("📥 Из MAX")
         self.tab_max = MaxTab(self.notebook.tab("📥 Из MAX"), self)
@@ -272,17 +282,20 @@ class NotesApp:
             msg += f"\nПропущено подозрительных записей: {skipped_files}"
         messagebox.showinfo("Очищено", msg, parent=self.root)
 
-    def open_inbox_file(self, event=None):
-        if event is not None and event.widget is not self.inbox_list:
-            return
-        selection = self.inbox_list.curselection()
-        if not selection:
+    def open_inbox_file(self, file_path: str):
+        if not file_path:
             return
         filepath = os.path.realpath(
-            os.path.join(APP_DATA_DIR, self.tab_max.inbox_files[selection[0]])
+            os.path.join(APP_DATA_DIR, file_path)
         )
         app_data_path = os.path.realpath(APP_DATA_DIR)
-        if os.path.commonpath((app_data_path, filepath)) != app_data_path:
+        try:
+            is_inside_app_data = (
+                os.path.commonpath((app_data_path, filepath)) == app_data_path
+            )
+        except ValueError:
+            is_inside_app_data = False
+        if not is_inside_app_data:
             messagebox.showerror(
                 "Ошибка", "Недопустимый путь к вложению.", parent=self.root
             )
@@ -349,6 +362,9 @@ class NotesApp:
         db_delete_event(note_id)
         self.warned.pop(note_id, None)
         self.refresh_list()
+
+    def refresh_orders(self):
+        self.orders_tab.refresh()
 
     def clear_past_events(self):
         now = datetime.now().isoformat(timespec="seconds")
