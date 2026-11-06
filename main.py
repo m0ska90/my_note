@@ -21,7 +21,7 @@ from ui.main_window import NotesApp
 _INSTANCE_MUTEX_HANDLE = None
 _MIGRATION_DONE = False
 _BOT_PROCESS: subprocess.Popen[bytes] | None = None
-_BOT_MUTEX_NAME = "Local\\MyNoteMaxBotReceiver"
+_BOT_MUTEX_NAME = "Local\\ЗаказикиBotReceiver"
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +29,7 @@ def is_already_running():
     if sys.platform != "win32":
         return False
     global _INSTANCE_MUTEX_HANDLE
-    mutex_name = "Global\\MyNotesAppMutex_UniqueName123"
+    mutex_name = "Global\\ЗаказикиMutex_UniqueName123"
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.argtypes = [
         wintypes.LPVOID,

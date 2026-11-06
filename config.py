@@ -1,5 +1,12 @@
 import logging
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Загружаем переменные из .env файла
+_env_path = Path(__file__).parent / ".env"
+if _env_path.is_file():
+    load_dotenv(_env_path, override=True)
 
 # Настраиваем логирование при загрузке конфига
 logger = logging.getLogger("config")
@@ -8,7 +15,7 @@ logger.debug("Загружен конфиг: APP_DATA_DIR=%s", os.environ.get("A
 
 APP_DATA_DIR = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")),
-    "MyNotesApp",
+    "Заказики",
 )
 DB_FILE = os.path.join(APP_DATA_DIR, "notes.db")
 INBOX_DIR = os.path.join(APP_DATA_DIR, "inbox")

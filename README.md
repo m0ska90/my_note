@@ -5,7 +5,7 @@
 Установка
 pip install -r requirements.txt
 Запуск
-python my_note.py          # Основное приложение
+python main.py          # Основное приложение
 python bot_receiver.py     # Бот-получатель сообщений из MAX
 или используйте готовые скрипты:
 
@@ -25,9 +25,8 @@ pysqlcipher3	Шифрование базы данных (опционально)
 Примечание: Для полного шифрования БД установите Microsoft C++ Build Tools и выполните pip install pysqlcipher3. Без него база работает в обычном режиме.
 
 🏗 Архитектура проекта
-my_note/
+Заказики/
 ├── main.py                  # Точка входа, проверка на один экземпляр
-├── my_note.py              # Обёртка для main.py
 ├── config.py               # Конфигурация (пути, цвета, константы)
 ├── config.json             # JSON-конфигурация (API, бот, health-check)
 ├── database.py             # Работа с БД (SQLCipher + fallback)
@@ -95,7 +94,7 @@ LOG_LEVEL=INFO
 HEALTH_PORT=8080
 Настройка токена бота
 python bot_receiver.py --configure-token
-Токен шифруется через DPAPI и сохраняется в %APPDATA%\MyNotesApp\max_bot_token.dpapi
+Токен шифруется через DPAPI и сохраняется в %APPDATA%\Заказики\max_bot_token.dpapi
 
 🔐 Шифрование базы данных
 Приложение поддерживает два режима работы с БД:
@@ -113,7 +112,7 @@ python bot_receiver.py --configure-token
 
 📊 База данных
 Движок: SQLite (или SQLCipher при наличии)
-Расположение: %APPDATA%\MyNotesApp\notes.db
+Расположение: %APPDATA%\Заказики\notes.db
 Таблицы:
 notes — заметки и события
 attachments — вложения (файлы)
@@ -156,7 +155,7 @@ pysqlcipher3 не устанавливается
 Требуется Microsoft C++ Build Tools. Альтернатива — работать без шифрования БД.
 
 Токен не сохраняется
-Убедитесь, что папка %APPDATA%\MyNotesApp существует и доступна для записи.
+Убедитесь, что папка %APPDATA%\Заказики существует и доступна для записи.
 
 Вложения не скачиваются
 Проверьте доступ к platform-api2.max.ru и наличие CA-сертификата.

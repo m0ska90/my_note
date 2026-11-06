@@ -46,7 +46,7 @@ MAX_API_BASE_URL = "https://platform-api2.max.ru"
 MAX_API_MIN_INTERVAL = 1 / 30
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ — лимит на размер вложения
 _last_api_request = 0.0
-_BOT_MUTEX_NAME = "Local\\MyNoteMaxBotReceiver"
+_BOT_MUTEX_NAME = "Local\\ЗаказикиBotReceiver"
 _BOT_MUTEX_HANDLE = None
 
 # Настраиваем сертификаты
@@ -413,7 +413,7 @@ def answer_callback(bot_token: str, callback_id: str, text: str | None = None) -
     body: dict[str, Any] = {"callback_id": callback_id}
     if text:
         body["text"] = text[:1024]
-    
+
     try:
         _wait_for_api_slot()
         response = requests.post(
@@ -685,7 +685,7 @@ def main():
     logger.info("Бот запущен. База данных: %s", DB_FILE)
     marker = None
     headers = {"Authorization": token.strip(), "Content-Type": "application/json"}
-    
+
     # Для отслеживания ошибок и backoff
     consecutive_errors = 0
     max_backoff = 60  # Максимальная задержка при ошибках

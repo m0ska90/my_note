@@ -12,8 +12,10 @@ CERT_PATH = Path(__file__).with_name("combined_ca.pem")
 if CERT_PATH.is_file():
     os.environ["REQUESTS_CA_BUNDLE"] = str(CERT_PATH)
 
-import requests
+# Загружаем .env ДО импорта config/bot_receiver (они читают env-переменные)
+import config  # noqa: F401
 
+import requests
 from bot_receiver import _load_token
 
 
@@ -34,6 +36,7 @@ def main() -> int:
         print("Файл combined_ca.pem не найден; используется хранилище сертификатов requests.")
 
     try:
+        # Пробуем без Bearer - MAX API принимает только токен
         response = requests.get(
             "https://platform-api2.max.ru/me",
             headers={"Authorization": token},

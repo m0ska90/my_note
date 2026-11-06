@@ -12,7 +12,7 @@
     "database": {
         "journal_mode": "WAL",
         "busy_timeout_ms": 10000,
-        "notes_dir": "%APPDATA%/MyNotesApp"
+        "notes_dir": "%APPDATA%/Заказики"
     },
     "retry": {
         "attachment_not_ready_max_retries": 3,

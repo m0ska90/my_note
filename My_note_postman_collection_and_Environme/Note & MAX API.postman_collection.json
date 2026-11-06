@@ -1,0 +1,85 @@
+{
+  "info": {
+    "_postman_id": "add241e7-3336-41a3-8430-7bc33e77e49e",
+    "name": "Note & MAX API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "58153911",
+    "_collection_link": "https://go.postman.co/collection/58153911-add241e7-3336-41a3-8430-7bc33e77e49e?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "New Request",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{maxToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://platform-api2.max.ru/updates",
+          "protocol": "https",
+          "host": [
+            "platform-api2",
+            "max",
+            "ru"
+          ],
+          "path": [
+            "updates"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "New Request",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{maxToken}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"text\": \"Привет, Илья! Бот успешно отправил это сообщение через Postman.\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://platform-api2.max.ru/messages?user_id=29658495",
+          "protocol": "https",
+          "host": [
+            "platform-api2",
+            "max",
+            "ru"
+          ],
+          "path": [
+            "messages"
+          ],
+          "query": [
+            {
+              "key": "user_id",
+              "value": "29658495"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

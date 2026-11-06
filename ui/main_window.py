@@ -371,7 +371,7 @@ class NotesApp:
                 pystray.MenuItem("Открыть", self._tray_restore),
                 pystray.MenuItem("Выход", self._tray_exit),
             )
-            self.tray_icon = pystray.Icon("MyNotes", image, "Заметки", menu)
+            self.tray_icon = pystray.Icon("Заказики", image, "Заметки", menu)
         self.tray_icon.run_detached()
 
     def _tray_restore(self, icon, _item):
