@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from config import APP_FONT, BG_MAIN, BG_PANEL, COLOR_DONE, FG_TEXT
 from database import delete_order, get_all_orders, get_note_text_by_order_id
+from ui.settings_dialog import SettingsDialog
 
 
 class OrdersTab(ctk.CTkFrame):
@@ -50,6 +51,17 @@ class OrdersTab(ctk.CTkFrame):
         # --- Панель кнопок ---
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(fill="x", padx=6, pady=(6, 2))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="💲 Цены",
+            command=self._open_settings,
+            font=APP_FONT,
+            width=140,
+            height=40,
+            fg_color=("#f39c12", "#d68910"),
+            hover_color=("#d68910", "#bf780e"),
+        ).pack(side="left", padx=4)
 
         ctk.CTkButton(
             btn_frame,
@@ -143,8 +155,14 @@ class OrdersTab(ctk.CTkFrame):
     # --------------------------------------------------------------- #
     def refresh(self) -> None:
         """Загрузить все заказы из БД и отобразить в таблице."""
+        selected_ids = {
+            str(self.tree.item(item, "values")[0])
+            for item in self.tree.selection()
+            if self.tree.item(item, "values")
+        }
         self.orders = get_all_orders()
         self.tree.delete(*self.tree.get_children())
+        inserted_ids = []
 
         now_date = None
         try:
@@ -166,9 +184,11 @@ class OrdersTab(ctk.CTkFrame):
                 except (ValueError, TypeError):
                     tag = "_row"
 
+            order_id = str(row[0])
             self.tree.insert(
                 "",
                 "end",
+                iid=order_id,
                 values=(
                     row[0],                    # id (скрытая колонка)
                     row[1] or "",              # customer
@@ -179,10 +199,24 @@ class OrdersTab(ctk.CTkFrame):
                 ),
                 tags=(tag,),
             )
+            inserted_ids.append(order_id)
+
+        restored_selection = [
+            order_id for order_id in inserted_ids if order_id in selected_ids
+        ]
+        if restored_selection:
+            self.tree.selection_set(restored_selection)
+        elif selected_ids and inserted_ids:
+            self.tree.selection_set(inserted_ids[0])
+        self.tree.yview_moveto(0)
 
     # --------------------------------------------------------------- #
     # Действия
     # --------------------------------------------------------------- #
+    def _open_settings(self) -> None:
+        """Открыть диалог настроек цен."""
+        SettingsDialog(self.main_app.root)
+
     def _delete_selected(self) -> None:
         selected = self.tree.selection()
         if not selected:
@@ -304,4 +338,3 @@ class OrdersTab(ctk.CTkFrame):
         if self.refresh_job is not None:
             self.main_app.root.after_cancel(self.refresh_job)
             self.refresh_job = None
-

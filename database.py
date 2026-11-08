@@ -127,7 +127,11 @@ def init_db() -> None:
                     extra_services REAL,
                     total_price REAL,
                     note_id INTEGER,
-                    FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL
+                    filament_id INTEGER,
+                    printer_id INTEGER,
+                    FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL,
+                    FOREIGN KEY(filament_id) REFERENCES filaments(id) ON DELETE SET NULL,
+                    FOREIGN KEY(printer_id) REFERENCES printers(id) ON DELETE SET NULL
                 )
                 """
             )
@@ -147,6 +151,43 @@ def init_db() -> None:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_orders_note_id ON orders(note_id)"
             )
+
+            # --- Оборудование и пластик ---
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS printers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS filaments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    printer_id INTEGER NOT NULL,
+                    material_type TEXT NOT NULL,
+                    price_per_gram REAL,
+                    FOREIGN KEY(printer_id) REFERENCES printers(id) ON DELETE CASCADE,
+                    UNIQUE(printer_id, material_type)
+                )
+                """
+            )
+            # Миграция: добавляем note_id, filament_id, printer_id если столбцов ещё нет
+            _ensure_orders_note_id_column(conn)
+            _ensure_orders_filament_id_column(conn)
+            _ensure_orders_printer_id_column(conn)
+
+            # Индексы для orders (после миграций, когда столбцы уже есть)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_filament_id ON orders(filament_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_printer_id ON orders(printer_id)"
+            )
+
+            # Инициализация оборудования
+            _init_printers_and_filaments(conn)
     except ValueError:
         logger.error("Неверный пароль шифрования. Перезапустите и введите правильный пароль.")
         raise
@@ -166,6 +207,137 @@ def _ensure_orders_note_id_column(conn) -> None:
         # Столбец уже существует или ошибка ограничений — игнорируем
         if "duplicate column" not in str(e).lower():
             logger.debug(" orders note_id check: %s", e)
+
+
+def _ensure_orders_filament_id_column(conn) -> None:
+    """Добавить столбец filament_id в orders если его ещё нет (миграция)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+    if "filament_id" not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN filament_id INTEGER")
+        logger.info("Миграция: добавлен столбец filament_id в таблицу orders.")
+
+
+def _ensure_orders_printer_id_column(conn) -> None:
+    """Добавить столбец printer_id в orders если его ещё нет (миграция)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+    if "printer_id" not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN printer_id INTEGER")
+        logger.info("Миграция: добавлен столбец printer_id в таблицу orders.")
+
+
+# ================================================================
+# ОБОРУДОВАНИЕ И ПЛАСТИК
+# ================================================================
+
+def _init_printers_and_filaments(conn) -> None:
+    """Заполнить таблицы printers и filaments начальными данными (если пусто)."""
+    cursor = conn.cursor()
+
+    # 1. Принтеры
+    default_printers = [
+        "Elegoo Centauri Carbon",
+        "Elegoo Centauri Carbon 2",
+    ]
+    for name in default_printers:
+        try:
+            cursor.execute(
+                "INSERT INTO printers (name) VALUES (?)", (name,)
+            )
+            logger.info("Принтер добавлен: %s", name)
+        except sqlite3.IntegrityError:
+            pass  # уже существует
+
+    # 2. Пластик для каждого принтера
+    default_filaments = [
+        ("PLA", 2.0),
+        ("PETG", 2.5),
+        ("ABS", 2.3),
+        ("TPU", 3.0),
+    ]
+
+    cursor.execute("SELECT id FROM printers")
+    printers = cursor.fetchall()
+
+    for (printer_id,) in printers:
+        for material, price in default_filaments:
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO filaments (printer_id, material_type, price_per_gram)
+                    VALUES (?, ?, ?)
+                    """,
+                    (printer_id, material, price),
+                )
+            except sqlite3.IntegrityError:
+                pass  # уже существует
+
+
+def get_all_printers() -> list[tuple]:
+    """Вернуть список всех принтеров: (id, name)."""
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM printers ORDER BY name")
+        return cursor.fetchall()
+
+
+def get_filaments_by_printer(printer_id: int) -> list[tuple]:
+    """Вернуть список пластиков для принтера: (id, material_type, price_per_gram)."""
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, material_type, price_per_gram
+            FROM filaments
+            WHERE printer_id = ?
+            ORDER BY material_type
+            """,
+            (printer_id,),
+        )
+        return cursor.fetchall()
+
+
+def get_filament_by_type(printer_id: int, material_type: str) -> tuple | None:
+    """Найти пластиков по типу и принтеру: (id, material_type, price_per_gram) или None.
+
+    material_type — регистронезависимый поиск.
+    """
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, material_type, price_per_gram
+            FROM filaments
+            WHERE printer_id = ? AND LOWER(material_type) = LOWER(?)
+            """,
+            (printer_id, material_type),
+        )
+        return cursor.fetchone()
+
+
+def update_filament_price(filament_id: int, price_per_gram: float) -> None:
+    """Сохранить фактическую цену за грамм."""
+    with _connect_db() as conn:
+        conn.execute(
+            "UPDATE filaments SET price_per_gram = ? WHERE id = ?",
+            (price_per_gram, filament_id),
+        )
+
+
+def get_filament_price(filament_id: int) -> float:
+    """Вернуть цену за грамм для пластика.
+
+    Если price_per_gram == NULL — возвращает дефолтную цену 2.0 руб/г.
+    """
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT price_per_gram FROM filaments WHERE id = ?",
+            (filament_id,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+        return 2.0  # Дефолтная цена
 
 
 def migrate_from_plaintext(password: str | None = None) -> bool:
@@ -391,15 +563,17 @@ def add_order(
     extra_services: float,
     total_price: float,
     note_id: int | None = None,
+    filament_id: int | None = None,
+    printer_id: int | None = None,
 ) -> None:
     with _connect_db() as conn:
         conn.execute(
             """
             INSERT INTO orders (
                 customer_name, deadline, file_path, weight_grams,
-                print_time_hours, material_type, extra_services, total_price, note_id
+                print_time_hours, material_type, extra_services, total_price, note_id, filament_id, printer_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 customer_name,
@@ -411,6 +585,8 @@ def add_order(
                 extra_services,
                 total_price,
                 note_id,
+                filament_id,
+                printer_id,
             ),
         )
 
@@ -421,9 +597,9 @@ def get_all_orders() -> list[tuple]:
         cursor.execute(
             """
             SELECT id, customer_name, deadline, file_path, weight_grams,
-                   print_time_hours, material_type, extra_services, total_price, note_id
+                   print_time_hours, material_type, extra_services, total_price, note_id, filament_id, printer_id
             FROM orders
-            ORDER BY deadline
+            ORDER BY id DESC
             """
         )
         return cursor.fetchall()

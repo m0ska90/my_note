@@ -1,10 +1,33 @@
+"""Расчёт стоимости 3D-печати."""
+
+from database import get_filament_price
+
+
 def calculate_price(
     weight_grams: float,
     time_hours: float,
-    material_price_per_gram: float = 2.0,
+    filament_id: int | None = None,
     extra_services: float = 0.0,
 ) -> float:
-    material_cost = weight_grams * material_price_per_gram * 1.15
+    """Рассчитать стоимость печати.
+
+    Args:
+        weight_grams: вес модели в граммах.
+        time_hours: время печати в часах.
+        filament_id: ID пластика из таблицы filaments.
+                      Если None — используется дефолтная цена 2.0 руб/г.
+        extra_services: стоимость доп. услуг.
+
+    Returns:
+        Общая стоимость.
+    """
+    # Получаем актуальную цену пластика из БД
+    if filament_id is not None:
+        material_price = get_filament_price(filament_id)
+    else:
+        material_price = 2.0  # Дефолтная цена
+
+    material_cost = weight_grams * material_price * 1.15
     labor_cost = time_hours * 250
     depreciation_cost = time_hours * 15
     electricity_cost = time_hours * 1
