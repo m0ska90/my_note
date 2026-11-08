@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from config import APP_FONT, BG_PANEL, INBOX_DIR
 from database import clear_max_text_notes
+from ui.bot_settings_dialog import BotSettingsDialog
 from ui.order_dialog import OrderDialog
 
 
@@ -33,6 +34,14 @@ class MaxTab(ctk.CTkFrame):
             text="🔄 Обновить",
             command=self.main_app.refresh_inbox,
             width=180,
+            height=45,
+            font=APP_FONT,
+        ).pack(side="left", padx=5, pady=6)
+        ctk.CTkButton(
+            action_row,
+            text="⚙ Настроить бота",
+            command=lambda: BotSettingsDialog(self.main_app),
+            width=220,
             height=45,
             font=APP_FONT,
         ).pack(side="left", padx=5, pady=6)

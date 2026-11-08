@@ -2,6 +2,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -113,9 +114,16 @@ def _find_file_with_extension(path: str) -> str | None:
 class NotesApp:
     open_file = staticmethod(open_file)
 
-    def __init__(self, root, on_close_callback: Callable[[], None] | None = None):
+    def __init__(
+        self,
+        root,
+        bot_running_check: Callable[[], bool] | None = None,
+    ):
         self.root = root
-        self.on_close_callback = on_close_callback
+        self.bot_running_check = bot_running_check
+        self.bot_process: subprocess.Popen[bytes] | None = None
+        self._bot_monitor_job = None
+        self._closing = False
         self.root.title("Заказики и MAX")
         self.root.configure(fg_color=BG_MAIN)
         self.root.attributes("-alpha", 1.0)
@@ -157,6 +165,132 @@ class NotesApp:
             self.root.state("zoomed")
         else:
             self.root.attributes("-zoomed", True)
+
+    def start_bot(self) -> bool:
+        """Запустить MAX-бота в фоновом процессе."""
+        try:
+            if self.bot_running_check is not None and self.bot_running_check():
+                logger.info("MAX-бот уже запущен.")
+                return False
+
+            if getattr(sys, "frozen", False):
+                try:
+                    import bot_receiver
+                except ImportError as error:
+                    raise FileNotFoundError(
+                        "В сборке приложения отсутствует модуль bot_receiver."
+                    ) from error
+                if not callable(bot_receiver.main):
+                    raise FileNotFoundError(
+                        "В сборке приложения отсутствует точка входа MAX-бота."
+                    )
+                command = [sys.executable, "--run-bot"]
+            else:
+                bot_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "bot_receiver.py",
+                )
+                if not os.path.isfile(bot_path):
+                    raise FileNotFoundError(
+                        f"Файл бота не найден: {bot_path}"
+                    )
+                command = [sys.executable, bot_path]
+
+            process = subprocess.Popen(
+                command,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            logger.exception("Не удалось запустить MAX-бота.")
+            if sys.stderr is not None:
+                print(f"Ошибка запуска MAX-бота: {error}", file=sys.stderr)
+            messagebox.showerror(
+                "Ошибка запуска MAX-бота",
+                f"Не удалось запустить бота:\n{error}",
+                parent=self.root,
+            )
+            return False
+
+        self.bot_process = process
+        self._bot_monitor_job = self.root.after(
+            1500,
+            lambda: self._monitor_bot(process),
+        )
+        return True
+
+    def stop_bot(self) -> None:
+        """Остановить управляемый приложением процесс бота."""
+        process = self.bot_process
+        self.bot_process = None
+
+        if self._bot_monitor_job is not None:
+            self.root.after_cancel(self._bot_monitor_job)
+            self._bot_monitor_job = None
+
+        if process is None or process.poll() is not None:
+            return
+
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                logger.exception(
+                    "Процесс MAX-бота не завершился после принудительной остановки."
+                )
+        except OSError:
+            logger.exception("Не удалось корректно завершить процесс MAX-бота.")
+
+    def restart_bot(self) -> bool:
+        """Перезапустить MAX-бота, например после смены токена."""
+        self.stop_bot()
+        return self.start_bot()
+
+    def _monitor_bot(self, process: subprocess.Popen[bytes]) -> None:
+        if process is not self.bot_process:
+            return
+
+        self._bot_monitor_job = None
+        return_code = process.poll()
+        if return_code is None:
+            self._bot_monitor_job = self.root.after(
+                3000,
+                lambda: self._monitor_bot(process),
+            )
+            return
+
+        self.bot_process = None
+        if self._closing:
+            return
+
+        try:
+            bot_is_running = (
+                self.bot_running_check is not None
+                and self.bot_running_check()
+            )
+        except OSError as error:
+            logger.exception("Не удалось проверить состояние MAX-бота.")
+            messagebox.showwarning(
+                "MAX-бот",
+                f"Бот завершился с кодом {return_code}; "
+                f"не удалось проверить наличие другого экземпляра:\n{error}",
+                parent=self.root,
+            )
+            return
+
+        if not bot_is_running:
+            messagebox.showwarning(
+                "MAX-бот",
+                f"Процесс бота завершился (код {return_code}). "
+                "Проверьте токен и журнал запуска.",
+                parent=self.root,
+            )
 
     def _check_tab_switch(self):
         """Проверяем текущую активную вкладку каждые 2 секунды."""
@@ -511,6 +645,9 @@ class NotesApp:
                 self.alert_job = self.root.after(100, self.show_next_alert)
 
     def on_close(self):
+        self._closing = True
+        self.stop_bot()
+
         # Остановить автообновление заказов
         if hasattr(self, "orders_tab") and self.orders_tab:
             self.orders_tab.stop_auto_refresh()
@@ -525,8 +662,6 @@ class NotesApp:
 
         if HAS_TRAY and self.tray_icon is not None:
             self.tray_icon.stop()
-        if self.on_close_callback is not None:
-            self.on_close_callback()
         for job in (self.check_job, self.alert_job):
             if job:
                 self.root.after_cancel(job)

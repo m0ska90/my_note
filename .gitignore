@@ -14,12 +14,18 @@ MANIFEST
 
 # ===== 虚拟环境 =====
 .venv/
+.venv-*/
 venv/
 env/
 ENV/
 
+# Local credentials and environment variables
+.env
+
 # SSH keys — never commit
 *.pem
+# Public CA bundles required by the application
+!combined_ca.pem
 *.key
 id_rsa
 id_rsa.pub

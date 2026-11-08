@@ -7,6 +7,8 @@ import logging
 import os
 import tempfile
 
+from crypto_utils import _dpapi_transform
+
 logger = logging.getLogger("crypto_key")
 
 # Путь к зашифрованному ключу шифрования БД
@@ -17,44 +19,6 @@ def set_key_path(key_file: str) -> None:
     """Установить путь к файлу ключа (вызывается при инициализации)."""
     global _DB_KEY_FILE
     _DB_KEY_FILE = key_file
-
-
-def _dpapi_transform(data: bytes, decrypt: bool) -> bytes:
-    """Шифрование/дешифрование через Windows DPAPI."""
-    if os.name != "nt":
-        raise RuntimeError("DPAPI доступен только на Windows.")
-    from ctypes import wintypes
-    import ctypes
-
-    class DataBlob(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-
-    buffer = ctypes.create_string_buffer(data)
-    input_blob = DataBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
-    output_blob = DataBlob()
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    if decrypt:
-        transform = crypt32.CryptUnprotectData
-    else:
-        transform = crypt32.CryptProtectData
-
-    transform.argtypes = [
-        ctypes.POINTER(DataBlob), ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD,
-        ctypes.POINTER(DataBlob),
-    ]
-    transform.restype = wintypes.BOOL
-    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel32.LocalFree.restype = ctypes.c_void_p
-
-    if not transform(ctypes.byref(input_blob), None, None, None, None, 1, ctypes.byref(output_blob)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
-    finally:
-        kernel32.LocalFree(output_blob.pbData)
 
 
 def _save_key(password: str) -> None:

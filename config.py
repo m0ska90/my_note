@@ -1,10 +1,14 @@
 import logging
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла
-_env_path = Path(__file__).parent / ".env"
+if getattr(sys, "frozen", False):
+    _env_path = Path(sys.executable).resolve().parent / ".env"
+else:
+    _env_path = Path(__file__).resolve().parent / ".env"
 if _env_path.is_file():
     load_dotenv(_env_path, override=True)
 
@@ -13,15 +17,16 @@ logger = logging.getLogger("config")
 
 logger.debug("Загружен конфиг: APP_DATA_DIR=%s", os.environ.get("APPDATA", "Not set"))
 
-APP_DATA_DIR = os.path.join(
-    os.environ.get("APPDATA", os.path.expanduser("~")),
-    "Заказики",
-)
+USER_DATA_DIR = os.environ.get("APPDATA", os.path.expanduser("~"))
+APP_DATA_DIR = os.path.join(USER_DATA_DIR, "Заказики")
 DB_FILE = os.path.join(APP_DATA_DIR, "notes.db")
 INBOX_DIR = os.path.join(APP_DATA_DIR, "inbox")
-TOKEN_FILE = os.path.join(APP_DATA_DIR, "max_bot_token.dpapi")
+TOKEN_FILE = os.path.join(USER_DATA_DIR, "MyNotesApp", "max_bot_token.dpapi")
 DB_KEY_FILE = os.path.join(APP_DATA_DIR, "db_key.dpapi")
-CERT_PATH = os.path.join(os.path.dirname(__file__), "combined_ca.pem")
+_resource_dir = Path(
+    getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)
+)
+CERT_PATH = str(_resource_dir / "combined_ca.pem")
 
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 os.makedirs(INBOX_DIR, exist_ok=True)

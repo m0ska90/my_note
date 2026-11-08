@@ -1,7 +1,5 @@
 import ctypes
-import logging
 import os
-import subprocess
 import sys
 
 # Добавляем корень проекта в sys.path для корректных импортов
@@ -20,9 +18,7 @@ from ui.main_window import NotesApp
 
 _INSTANCE_MUTEX_HANDLE = None
 _MIGRATION_DONE = False
-_BOT_PROCESS: subprocess.Popen[bytes] | None = None
 _BOT_MUTEX_NAME = "Local\\ЗаказикиBotReceiver"
-logger = logging.getLogger(__name__)
 
 
 def is_already_running():
@@ -100,100 +96,6 @@ def _is_bot_running() -> bool:
     return False
 
 
-def _monitor_bot(root: ctk.CTk, process: subprocess.Popen[bytes]) -> None:
-    global _BOT_PROCESS
-    return_code = process.poll()
-    if return_code is None:
-        root.after(3000, lambda: _monitor_bot(root, process))
-        return
-
-    _BOT_PROCESS = None
-    try:
-        bot_is_running = _is_bot_running()
-    except OSError as error:
-        logger.exception("Не удалось проверить состояние MAX-бота.")
-        messagebox.showwarning(
-            "MAX-бот",
-            f"Бот завершился с кодом {return_code}; "
-            f"не удалось проверить наличие другого экземпляра:\n{error}",
-            parent=root,
-        )
-        return
-    if not bot_is_running:
-        messagebox.showwarning(
-            "MAX-бот",
-            f"Процесс бота завершился (код {return_code}). "
-            "Проверьте токен и журнал запуска.",
-            parent=root,
-        )
-
-
-def _start_bot(root: ctk.CTk) -> None:
-    global _BOT_PROCESS
-    try:
-        if _is_bot_running():
-            logger.info("MAX-бот уже запущен.")
-            return
-
-        if getattr(sys, "frozen", False):
-            try:
-                import bot_receiver
-            except ImportError as error:
-                raise FileNotFoundError(
-                    "В сборке приложения отсутствует модуль bot_receiver."
-                ) from error
-            if not callable(bot_receiver.main):
-                raise FileNotFoundError(
-                    "В сборке приложения отсутствует точка входа MAX-бота."
-                )
-            command = [sys.executable, "--run-bot"]
-        else:
-            bot_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "bot_receiver.py",
-            )
-            if not os.path.isfile(bot_path):
-                raise FileNotFoundError(f"Файл бота не найден: {bot_path}")
-            command = [sys.executable, bot_path]
-
-        process = subprocess.Popen(
-            command,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        _BOT_PROCESS = process
-        root.after(1500, lambda: _monitor_bot(root, process))
-    except (OSError, subprocess.SubprocessError) as error:
-        logger.exception("Не удалось запустить MAX-бот.")
-        messagebox.showerror(
-            "Ошибка запуска MAX-бота",
-            f"Не удалось запустить бота:\n{error}",
-            parent=root,
-        )
-
-
-def _stop_bot() -> None:
-    global _BOT_PROCESS
-    process = _BOT_PROCESS
-    _BOT_PROCESS = None
-    if process is None or process.poll() is not None:
-        return
-
-    try:
-        process.terminate()
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        try:
-            process.kill()
-            process.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
-            logger.exception("Процесс MAX-бота не завершился после принудительной остановки.")
-    except OSError:
-        logger.exception("Не удалось корректно завершить процесс MAX-бота.")
-
-
 def main():
     if "--run-bot" in sys.argv[1:]:
         from bot_receiver import main as bot_main
@@ -227,8 +129,8 @@ def main():
         sys.stderr.write(''.join(traceback.format_exception(exc_type, exc_val, exc_tb)))
     root.report_callback_exception = _suppress_ctk_errors
     
-    NotesApp(root, on_close_callback=_stop_bot)
-    _start_bot(root)
+    app = NotesApp(root, bot_running_check=_is_bot_running)
+    app.start_bot()
     root.mainloop()
 
 

@@ -21,7 +21,8 @@ if _project_root not in sys.path:
 
 import requests
 
-from config import APP_DATA_DIR as APP_DIR, CERT_PATH, DB_FILE, INBOX_DIR, TOKEN_FILE
+from config import APP_DATA_DIR as APP_DIR, CERT_PATH, DB_FILE, INBOX_DIR
+from crypto_utils import TOKEN_FILE, load_token, save_token
 from database import (
     add_attachment,
     add_max_text_note as add_text_note,
@@ -54,64 +55,13 @@ if os.path.exists(CERT_PATH):
     os.environ["REQUESTS_CA_BUNDLE"] = CERT_PATH
 
 
-# --- Шифрование токена (DPAPI) ---
-def _dpapi_transform(data: bytes, decrypt: bool) -> bytes:
-    if os.name != "nt":
-        raise RuntimeError("Зашифрованное хранение доступно только в Windows.")
-    from ctypes import wintypes
-
-    class DataBlob(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-
-    buffer = ctypes.create_string_buffer(data)
-    input_blob = DataBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte)))
-    output_blob = DataBlob()
-    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    if decrypt:
-        transform = crypt32.CryptUnprotectData
-    else:
-        transform = crypt32.CryptProtectData
-
-    transform.argtypes = [
-        ctypes.POINTER(DataBlob), ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD,
-        ctypes.POINTER(DataBlob),
-    ]
-    transform.restype = wintypes.BOOL
-    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel32.LocalFree.restype = ctypes.c_void_p
-
-    if not transform(ctypes.byref(input_blob), None, None, None, None, 1, ctypes.byref(output_blob)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        return ctypes.string_at(output_blob.pbData, output_blob.cbData)
-    finally:
-        kernel32.LocalFree(output_blob.pbData)
-
-def _save_token(token: str) -> None:
-    os.makedirs(APP_DIR, exist_ok=True)
-    encrypted = _dpapi_transform(token.encode("utf-8"), decrypt=False)
-    with tempfile.NamedTemporaryFile("wb", dir=APP_DIR, delete=False) as file:
-        temp = file.name
-        file.write(encrypted)
-    os.replace(temp, TOKEN_FILE)
-
-def _load_token() -> str | None:
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "rb") as file:
-            encrypted = file.read()
-        return _dpapi_transform(encrypted, decrypt=True).decode("utf-8")
-    return os.environ.get("MAX_BOT_TOKEN")
-
 def configure_token() -> None:
     token = getpass.getpass("Введите новый токен MAX (ввод скрыт): ").strip()
     if not token:
         raise ValueError("Токен не может быть пустым.")
     if token != getpass.getpass("Повторите ввод токена: ").strip():
         raise ValueError("Токены не совпадают; сохранение отменено.")
-    _save_token(token)
+    save_token(token)
     logger.info("Токен зашифрован и сохранен: %s", TOKEN_FILE)
 
 def _get_allowed_chat_ids() -> set[int]:
@@ -668,7 +618,7 @@ def main():
     init_db()
     
     try:
-        token = _load_token()
+        token = load_token() or os.environ.get("MAX_BOT_TOKEN")
     except (OSError, RuntimeError, UnicodeError, ValueError) as error:
         logger.error("Не удалось прочитать сохраненный токен: %s", error)
         return

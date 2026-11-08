@@ -16,12 +16,12 @@ if CERT_PATH.is_file():
 import config  # noqa: F401
 
 import requests
-from bot_receiver import _load_token
+from crypto_utils import load_token
 
 
 def main() -> int:
     try:
-        token = (_load_token() or "").strip()
+        token = (load_token() or os.environ.get("MAX_BOT_TOKEN", "")).strip()
     except (OSError, RuntimeError, UnicodeError, ValueError) as error:
         print(f"Не удалось прочитать сохраненный токен: {error}")
         return 1
