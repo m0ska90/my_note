@@ -12,6 +12,17 @@ from database import add_order, get_all_printers, get_filaments_by_printer, get_
 from pricing import calculate_price
 
 
+EXTRA_SERVICE_PRICES = {
+    "Без доп. услуг (0 ₽)": 0.0,
+    "Шлифовка (200 ₽)": 200.0,
+    "Грунтовка (200 ₽)": 200.0,
+    "Покраска в 1 цвет (500 ₽)": 500.0,
+    "Срочный заказ (+50%)": 0.0,
+    "3D-моделирование (2000 ₽)": 2000.0,
+}
+RUSH_ORDER_SERVICE = "Срочный заказ (+50%)"
+
+
 def parse_gcode(file_path: str) -> dict | None:
     """Парсит G-code файл и возвращает вес и время.
 
@@ -283,11 +294,16 @@ class OrderDialog(ctk.CTkToplevel):
             height=36,
         ).pack(fill="x", pady=(8, 4))
 
-        ctk.CTkLabel(content_frame, text="Доп. услуги (руб.):", font=APP_FONT).pack(
+        ctk.CTkLabel(content_frame, text="Доп. услуги:", font=APP_FONT).pack(
             anchor="w", **pad
         )
-        self.extra_entry = ctk.CTkEntry(content_frame, font=APP_FONT)
-        self.extra_entry.pack(fill="x", padx=12)
+        self.extra_service_menu = ctk.CTkOptionMenu(
+            content_frame,
+            values=list(EXTRA_SERVICE_PRICES),
+            font=APP_FONT,
+        )
+        self.extra_service_menu.pack(fill="x", padx=12)
+        self.extra_service_menu.set("Без доп. услуг (0 ₽)")
 
         ctk.CTkButton(
             self,
@@ -440,10 +456,8 @@ class OrderDialog(ctk.CTkToplevel):
             if time_hours <= 0:
                 raise ValueError("Время должно быть больше 0.")
 
-            extra_text = self.extra_entry.get().strip() or "0"
-            if not re.fullmatch(r"\d+(?:[.,]\d+)?", extra_text):
-                raise ValueError("Сумма доп. услуг должна быть числом.")
-            extra_services = float(extra_text.replace(",", "."))
+            selected_service = self.extra_service_menu.get()
+            extra_services = EXTRA_SERVICE_PRICES[selected_service]
         except ValueError as error:
             tk_messagebox.showerror(
                 "Ошибка",
@@ -458,6 +472,10 @@ class OrderDialog(ctk.CTkToplevel):
             filament_id=self.filament_id,
             extra_services=extra_services,
         )
+        if selected_service == RUSH_ORDER_SERVICE:
+            rush_surcharge = total_price * 0.5
+            total_price += rush_surcharge
+            extra_services += rush_surcharge
 
         # Получаем материал из комбо-бокса для хранения в orders
         filament_name = self.filament_combo.get().split(":", 1)[1].strip() if self.filament_combo.get() else "PLA"
