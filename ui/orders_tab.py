@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from config import APP_FONT, BG_MAIN, BG_PANEL, COLOR_DONE, FG_TEXT
-from database import delete_order, get_all_orders
+from database import delete_order, get_all_orders, get_note_text_by_order_id
 
 
 class OrdersTab(ctk.CTkFrame):
@@ -112,6 +112,25 @@ class OrdersTab(ctk.CTkFrame):
 
         self.tree.pack(fill="both", expand=True)
 
+        # --- Текстовое поле с описанием заказа ---
+        details_header = ctk.CTkLabel(
+            table_frame,
+            text="Описание заказа:",
+            font=("Segoe UI", 14, "bold"),
+        )
+        details_header.pack(fill="x", padx=6, pady=(6, 2))
+
+        self.order_details_text = ctk.CTkTextbox(
+            table_frame,
+            height=120,
+            wrap="word",
+            font=("Segoe UI", 15),
+        )
+        self.order_details_text.pack(
+            fill="x", padx=6, pady=(0, 4)
+        )
+        self.order_details_text.configure(state="disabled")
+
         # Привязка двойного клика — показать детали
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>", self._on_double_click)
@@ -187,7 +206,29 @@ class OrdersTab(ctk.CTkFrame):
         self.refresh()
 
     def _on_select(self, _event=None) -> None:
-        pass
+        """При выборе заказа — показать текст заметки в текстовом поле."""
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        item = self.tree.item(selected[0])
+        values = item["values"]
+        if not values:
+            return
+
+        order_id = values[0]
+        note_text = get_note_text_by_order_id(order_id)
+
+        # Очищаем и вставляем текст
+        self.order_details_text.configure(state="normal")
+        self.order_details_text.delete("1.0", "end")
+        if note_text:
+            self.order_details_text.insert("1.0", note_text)
+        else:
+            self.order_details_text.insert(
+                "1.0", "Нет описания из MAX для этого заказа."
+            )
+        self.order_details_text.configure(state="disabled")
 
     def _on_double_click(self, event) -> None:
         """Двойной клик — показать полное описание заказа в диалоге."""

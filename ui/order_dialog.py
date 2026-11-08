@@ -92,12 +92,14 @@ def parse_gcode(file_path: str) -> dict | None:
 
 
 class OrderDialog(ctk.CTkToplevel):
-    def __init__(self, parent, file_path: str = ""):
+    def __init__(self, parent, file_path: str = "", note_text: str = "", note_id: int = None):
         super().__init__(parent)
         self.file_path = file_path
+        self.note_text = note_text
+        self.note_id = note_id
         self.main_app = parent  # Сохраняем ссылку на главное окно
         self.title("Оформление 3D-заказа")
-        self.geometry("420x620")
+        self.geometry("480x700")
         self.configure(fg_color=BG_MAIN)
         self.resizable(False, False)
         self.transient(parent)
@@ -105,6 +107,30 @@ class OrderDialog(ctk.CTkToplevel):
         self.lift()
 
         pad = {"padx": 12, "pady": 4}
+
+        # --- Блок: Текст заметки из MAX (только для чтения) ---
+        if note_text:
+            note_frame = ctk.CTkFrame(self, fg_color="#f0f0f0")
+            note_frame.pack(fill="both", expand=True, padx=12, pady=(4, 0))
+
+            ctk.CTkLabel(
+                note_frame,
+                text="📝 Текст заказа из MAX:",
+                font=("Segoe UI", 14, "bold"),
+                anchor="w",
+            ).pack(fill="x", padx=8, pady=(6, 2))
+
+            self.note_display = ctk.CTkTextbox(
+                note_frame,
+                height=100,
+                wrap="word",
+                font=("Segoe UI", 14),
+            )
+            self.note_display.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+            # Сначала включаем режим редактирования, вставляем текст, затем блокируем
+            self.note_display.configure(state="normal")
+            self.note_display.insert("1.0", note_text)
+            self.note_display.configure(state="disabled")
         ctk.CTkLabel(self, text="Имя заказчика:", font=APP_FONT).pack(
             anchor="w", **pad
         )
@@ -284,6 +310,7 @@ class OrderDialog(ctk.CTkToplevel):
                 material_type=self.material_combo.get(),
                 extra_services=extra_services,
                 total_price=total_price,
+                note_id=self.note_id,
             )
         except (OSError, sqlite3.Error, ValueError) as error:
             tk_messagebox.showerror(

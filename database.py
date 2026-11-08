@@ -86,7 +86,10 @@ def init_db() -> None:
     try:
         with _connect_db() as conn:
             conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA foreign_keys = ON")
             cursor = conn.cursor()
+
+            # Создаём таблицы если не существуют
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS notes (
@@ -122,10 +125,15 @@ def init_db() -> None:
                     print_time_hours REAL,
                     material_type TEXT,
                     extra_services REAL,
-                    total_price REAL
+                    total_price REAL,
+                    note_id INTEGER,
+                    FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL
                 )
                 """
             )
+            # Миграция: добавляем note_id если столбца ещё нет
+            _ensure_orders_note_id_column(conn)
+
             # Индексы для производительности
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_notes_remind_at ON notes(remind_at)"
@@ -136,9 +144,28 @@ def init_db() -> None:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_attachments_note_id ON attachments(note_id)"
             )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_note_id ON orders(note_id)"
+            )
     except ValueError:
         logger.error("Неверный пароль шифрования. Перезапустите и введите правильный пароль.")
         raise
+
+
+def _ensure_orders_note_id_column(conn) -> None:
+    """Добавить столбец note_id в orders если его ещё нет (миграция)."""
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("ALTER TABLE orders ADD COLUMN note_id INTEGER")
+        conn.execute(
+            "ALTER TABLE orders ADD CONSTRAINT fk_orders_note "
+            "FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL"
+        )
+        logger.info("Миграция: добавлен столбец note_id в таблицу orders.")
+    except sqlite3.OperationalError as e:
+        # Столбец уже существует или ошибка ограничений — игнорируем
+        if "duplicate column" not in str(e).lower():
+            logger.debug(" orders note_id check: %s", e)
 
 
 def migrate_from_plaintext(password: str | None = None) -> bool:
@@ -363,15 +390,16 @@ def add_order(
     material_type: str,
     extra_services: float,
     total_price: float,
+    note_id: int | None = None,
 ) -> None:
     with _connect_db() as conn:
         conn.execute(
             """
             INSERT INTO orders (
                 customer_name, deadline, file_path, weight_grams,
-                print_time_hours, material_type, extra_services, total_price
+                print_time_hours, material_type, extra_services, total_price, note_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 customer_name,
@@ -382,6 +410,7 @@ def add_order(
                 material_type,
                 extra_services,
                 total_price,
+                note_id,
             ),
         )
 
@@ -392,12 +421,36 @@ def get_all_orders() -> list[tuple]:
         cursor.execute(
             """
             SELECT id, customer_name, deadline, file_path, weight_grams,
-                   print_time_hours, material_type, extra_services, total_price
+                   print_time_hours, material_type, extra_services, total_price, note_id
             FROM orders
             ORDER BY deadline
             """
         )
         return cursor.fetchall()
+
+
+def get_note_text_by_order_id(order_id: int) -> str | None:
+    """Вернуть текст описания заметки, связанной с заказом.
+
+    Args:
+        order_id: ID заказа.
+
+    Returns:
+        Текст описания из notes или None если не найден.
+    """
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT n.description
+            FROM orders o
+            LEFT JOIN notes n ON o.note_id = n.id
+            WHERE o.id = ?
+            """,
+            (order_id,),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
 
 
 def delete_order(order_id: int) -> None:
@@ -435,7 +488,7 @@ def get_max_text_notes() -> list[tuple]:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT created_at, description
+            SELECT id, created_at, description
             FROM notes
             WHERE title LIKE 'Заметка из MAX%'
             ORDER BY id DESC

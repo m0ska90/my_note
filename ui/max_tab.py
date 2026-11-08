@@ -15,6 +15,8 @@ class MaxTab(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.main_app = main_app
         self.selected_card: ctk.CTkFrame | None = None
+        self.selected_max_text: str = ""  # Текст выбранной карточки
+        self.selected_note_id: int = None  # ID выбранной заметки
         self.all_cards: list[ctk.CTkFrame] = []  # Список всех карточек
         self._build_ui()
 
@@ -45,7 +47,10 @@ class MaxTab(ctk.CTkFrame):
         ctk.CTkButton(
             action_row,
             text="📦 Оформить заказ",
-            command=self._open_order_dialog,
+            command=lambda: self._open_order_dialog(
+                note_text=getattr(self, "selected_max_text", ""),
+                note_id=getattr(self, "selected_note_id", None),
+            ),
             width=180,
             height=45,
             font=APP_FONT,
@@ -136,6 +141,8 @@ class MaxTab(ctk.CTkFrame):
                 pass  # виджет уже удалён или недоступен
         self.all_cards = []
         self.selected_card = None
+        self.selected_max_text = ""  # Сбрасываем при обновлении
+        self.selected_note_id = None
 
         if not max_notes:
             ctk.CTkLabel(
@@ -146,9 +153,9 @@ class MaxTab(ctk.CTkFrame):
             ).pack(pady=30)
             return
 
-        for i, (created_at, description) in enumerate(max_notes):
+        for i, (note_id, created_at, description) in enumerate(max_notes):
             dt = datetime.fromisoformat(created_at)
-            card = self._create_note_card(dt, description, i)
+            card = self._create_note_card(dt, description, note_id, i)
             self.all_cards.append(card)
 
     def _create_attachment_card(
@@ -171,7 +178,7 @@ class MaxTab(ctk.CTkFrame):
             command=lambda path=file_path: self.main_app.open_inbox_file(path),
         ).pack(side="right", padx=(4, 6), pady=4)
 
-    def _create_note_card(self, dt: datetime, text: str, index: int) -> ctk.CTkFrame:
+    def _create_note_card(self, dt: datetime, text: str, note_id: int = None, index: int = 0) -> ctk.CTkFrame:
         """Создать карточку для одной текстовой заметки."""
         card = ctk.CTkFrame(
             self.max_text,
@@ -182,8 +189,9 @@ class MaxTab(ctk.CTkFrame):
         card.pack(fill="x", padx=4, pady=(0, 6))
         card.configure(cursor="hand2")  # Курсор-рука при наведении
 
-        # Сохраняем текст в атрибут карточки
+        # Сохраняем текст и ID заметки в атрибут карточки
         card.note_text = text
+        card.note_id = note_id
 
         # Создаём все дочерние элементы с крупным шрифтом, прижаты к левому краю
         time_label = self._create_child_label(
@@ -213,38 +221,38 @@ class MaxTab(ctk.CTkFrame):
 
         # Привязываем события мыши КО ВСЕМ внутренним элементам
         # Чтобы клик по тексту тоже считался кликом по карточке
-        self._bind_card_events(card, text)
+        self._bind_card_events(card, text, note_id)
 
         return card
 
-    def _open_order_dialog(self, file_path: str = "") -> None:
-        OrderDialog(self.main_app.root, file_path=file_path)
+    def _open_order_dialog(self, file_path: str = "", note_text: str = "", note_id: int = None) -> None:
+        OrderDialog(self.main_app.root, file_path=file_path, note_text=note_text, note_id=note_id)
 
-    def _bind_card_events(self, card: ctk.CTkFrame, text: str) -> None:
+    def _bind_card_events(self, card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Привязать события мыши ко всем элементам карточки.
 
         Это нужно, потому что внутренние CTkLabel перехватывают события мыши,
         и клик по тексту не доходит до CTkFrame.
         """
         # Обработчики для самой карточки
-        card.bind("<Button-1>", lambda e: self._on_card_click(card, text))
+        card.bind("<Button-1>", lambda e: self._on_card_click(card, text, note_id))
         card.bind("<Enter>", lambda e: self._on_card_hover(card, True))
         card.bind("<Leave>", lambda e: self._on_card_hover(card, False))
 
         # Рекурсивно привязываем ко всем дочерним элементам
         for child in card.winfo_children():
-            self._bind_events_recursive(child, card, text)
+            self._bind_events_recursive(child, card, text, note_id)
 
-    def _bind_events_recursive(self, widget, card: ctk.CTkFrame, text: str) -> None:
+    def _bind_events_recursive(self, widget, card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Рекурсивно привязать события ко всем вложенным виджетам."""
         # Привязываем события мыши
-        widget.bind("<Button-1>", lambda e: self._on_card_click(card, text))
+        widget.bind("<Button-1>", lambda e: self._on_card_click(card, text, note_id))
         widget.bind("<Enter>", lambda e: self._on_card_hover(card, True))
         widget.bind("<Leave>", lambda e: self._on_card_hover(card, False))
 
         # Рекурсия для вложенных элементов
         for child in widget.winfo_children():
-            self._bind_events_recursive(child, card, text)
+            self._bind_events_recursive(child, card, text, note_id)
 
     def _create_child_label(self, parent, **kwargs) -> ctk.CTkLabel:
         """Создать CTkLabel с курсором-рукой."""
@@ -287,11 +295,11 @@ class MaxTab(ctk.CTkFrame):
             if card != self.selected_card:
                 card.configure(fg_color="transparent")
 
-    def _on_card_click(self, card: ctk.CTkFrame, text: str) -> None:
+    def _on_card_click(self, card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Обработка клика по карточке (вызывается при нажатии мыши)."""
-        self._select_card(card, text)
+        self._select_card(card, text, note_id)
 
-    def _select_card(self, selected_card: ctk.CTkFrame, text: str) -> None:
+    def _select_card(self, selected_card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Выделить карточку и сохранить текст сообщения.
 
         В один момент времени выделена ТОЛЬКО ОДНА карточка.
@@ -318,6 +326,7 @@ class MaxTab(ctk.CTkFrame):
                 selected_card.configure(border_color="#1f538d")
                 self.selected_card = selected_card
                 self.selected_max_text = text  # Сохраняем текст выбранного сообщения
+                self.selected_note_id = note_id  # Сохраняем ID заметки
         except tk.TclError:
             pass
 
