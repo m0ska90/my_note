@@ -21,6 +21,8 @@ set_key_path(DB_KEY_FILE)
 
 logger = logging.getLogger("database")
 
+ORDER_STATUSES = ("Новый", "В печати", "Готов", "Выдан", "Отменен")
+
 # Проверяем доступность SQLCipher
 _HAS_SQLCIPHER = False
 try:
@@ -129,6 +131,7 @@ def init_db() -> None:
                     note_id INTEGER,
                     filament_id INTEGER,
                     printer_id INTEGER,
+                    status TEXT NOT NULL DEFAULT 'Новый',
                     FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL,
                     FOREIGN KEY(filament_id) REFERENCES filaments(id) ON DELETE SET NULL,
                     FOREIGN KEY(printer_id) REFERENCES printers(id) ON DELETE SET NULL
@@ -137,6 +140,7 @@ def init_db() -> None:
             )
             # Миграция: добавляем note_id если столбца ещё нет
             _ensure_orders_note_id_column(conn)
+            _ensure_orders_status_column(conn)
 
             # Индексы для производительности
             cursor.execute(
@@ -223,6 +227,16 @@ def _ensure_orders_printer_id_column(conn) -> None:
     if "printer_id" not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN printer_id INTEGER")
         logger.info("Миграция: добавлен столбец printer_id в таблицу orders.")
+
+
+def _ensure_orders_status_column(conn) -> None:
+    """Добавить столбец status в orders если его ещё нет (миграция)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+    if "status" not in columns:
+        conn.execute(
+            "ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'Новый'"
+        )
+        logger.info("Миграция: добавлен столбец status в таблицу orders.")
 
 
 # ================================================================
@@ -571,9 +585,10 @@ def add_order(
             """
             INSERT INTO orders (
                 customer_name, deadline, file_path, weight_grams,
-                print_time_hours, material_type, extra_services, total_price, note_id, filament_id, printer_id
+                print_time_hours, material_type, extra_services, total_price,
+                note_id, filament_id, printer_id, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 customer_name,
@@ -587,6 +602,7 @@ def add_order(
                 note_id,
                 filament_id,
                 printer_id,
+                "Новый",
             ),
         )
 
@@ -597,7 +613,8 @@ def get_all_orders() -> list[tuple]:
         cursor.execute(
             """
             SELECT id, customer_name, deadline, file_path, weight_grams,
-                   print_time_hours, material_type, extra_services, total_price, note_id, filament_id, printer_id
+                   print_time_hours, material_type, extra_services, total_price,
+                   note_id, filament_id, printer_id, status
             FROM orders
             ORDER BY id DESC
             """
@@ -632,6 +649,20 @@ def get_note_text_by_order_id(order_id: int) -> str | None:
 def delete_order(order_id: int) -> None:
     with _connect_db() as conn:
         conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+
+
+def update_order_status(order_id: int, new_status: str) -> None:
+    """Обновить статус заказа."""
+    if new_status not in ORDER_STATUSES:
+        raise ValueError(f"Недопустимый статус заказа: {new_status}")
+
+    with _connect_db() as conn:
+        cursor = conn.execute(
+            "UPDATE orders SET status = ? WHERE id = ?",
+            (new_status, order_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Заказ с ID {order_id} не найден.")
 
 
 def delete_past_events(now: str) -> None:

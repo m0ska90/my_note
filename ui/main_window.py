@@ -147,11 +147,16 @@ class NotesApp:
         self._tab_check_job = None
         self._check_tab_switch()
 
-        # Разворачиваем на весь экран ПОСЛЕ сборки UI
+        # CTk.mainloop() показывает окно через deiconify(), сбрасывая state,
+        # поэтому максимизируем его после первоначального показа.
+        self.root.after(100, self._maximize_window)
+
+    def _maximize_window(self) -> None:
+        """Развернуть главное окно после его отображения."""
         if IS_WINDOWS:
-            self.root.state('zoomed')
+            self.root.state("zoomed")
         else:
-            self.root.attributes('-zoomed', True)
+            self.root.attributes("-zoomed", True)
 
     def _check_tab_switch(self):
         """Проверяем текущую активную вкладку каждые 2 секунды."""

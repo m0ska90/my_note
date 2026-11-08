@@ -1,13 +1,37 @@
 """Вкладка заказов с таблицей ttk.Treeview."""
 
+import sqlite3
 import tkinter.ttk as ttk
+from datetime import date
 
 import customtkinter as ctk
 from tkinter import messagebox
 
-from config import APP_FONT, BG_MAIN, BG_PANEL, COLOR_DONE, FG_TEXT
-from database import delete_order, get_all_orders, get_note_text_by_order_id
+from config import APP_FONT, BG_MAIN, BG_PANEL, FG_TEXT
+from database import (
+    ORDER_STATUSES,
+    delete_order,
+    get_all_orders,
+    get_note_text_by_order_id,
+    update_order_status,
+)
 from ui.settings_dialog import SettingsDialog
+
+
+ORDER_STATUS_TAGS = {
+    "Новый": ("_status_new", "#FFFFFF"),
+    "В печати": ("_status_printing", "#FFFACD"),
+    "Готов": ("_status_ready", "#E0FFE0"),
+    "Выдан": ("_status_issued", "#E0E0E0"),
+    "Отменен": ("_status_cancelled", "#FFE0E0"),
+}
+ORDER_STATUS_LABELS = {
+    "Новый": "🟦 Новый",
+    "В печати": "🟨 В печати",
+    "Готов": "🟩 Готов",
+    "Выдан": "🟥 Выдан",
+    "Отменен": "⬛ Отменен",
+}
 
 
 class OrdersTab(ctk.CTkFrame):
@@ -83,6 +107,15 @@ class OrdersTab(ctk.CTkFrame):
             hover_color=("#c0392b", "#a93226"),
         ).pack(side="left", padx=4)
 
+        ctk.CTkButton(
+            btn_frame,
+            text="🔄 Сменить статус",
+            command=self._change_selected_status,
+            font=APP_FONT,
+            width=170,
+            height=40,
+        ).pack(side="left", padx=4)
+
         # --- Таблица ---
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
         table_frame.pack(fill="both", expand=True, padx=6, pady=4)
@@ -95,7 +128,7 @@ class OrdersTab(ctk.CTkFrame):
 
         self.tree = ttk.Treeview(
             table_frame,
-            columns=("id", "customer", "deadline", "weight", "time", "price"),
+            columns=("id", "customer", "deadline", "weight", "time", "price", "status"),
             show="headings",
             style="Orders.Treeview",
             yscrollcommand=y_scroll.set,
@@ -111,16 +144,17 @@ class OrdersTab(ctk.CTkFrame):
             {"name": "weight",     "text": "Вес (г)",  "width": 110, "anchor": "c", "hidden": False},
             {"name": "time",       "text": "Время (ч)", "width": 110, "anchor": "c", "hidden": False},
             {"name": "price",      "text": "Цена (руб)", "width": 120, "anchor": "e", "hidden": False},
+            {"name": "status",     "text": "Статус", "width": 170, "anchor": "c", "hidden": False},
         ]
 
         for col in self._columns:
             self.tree.heading(col["name"], text=col["text"])
             self.tree.column(col["name"], width=col["width"], anchor=col["anchor"])
 
-        # Подсветка строк — цвет фона по умолчанию
-        self.tree.tag_configure("_row", background=BG_PANEL, foreground=FG_TEXT)
+        for tag, background in ORDER_STATUS_TAGS.values():
+            self.tree.tag_configure(tag, background=background, foreground=FG_TEXT)
         # Просроченные заказы — красным текстом
-        self.tree.tag_configure("_overdue", foreground="#e74c3c", background=BG_PANEL)
+        self.tree.tag_configure("_overdue", foreground="#e74c3c")
 
         self.tree.pack(fill="both", expand=True)
 
@@ -164,25 +198,20 @@ class OrdersTab(ctk.CTkFrame):
         self.tree.delete(*self.tree.get_children())
         inserted_ids = []
 
-        now_date = None
-        try:
-            from datetime import date
-            now_date = date.today()
-        except Exception:
-            pass
+        now_date = date.today()
 
         for row in self.orders:
-            # row: (id, customer, deadline, file_path, weight, time, material, extra, price)
-            tag = "_overdue" if now_date else "_row"
-            if now_date:
-                try:
-                    dl = __import__("datetime").date.fromisoformat(row[2])
-                    if dl < now_date:
-                        tag = "_overdue"
-                    else:
-                        tag = "_row"
-                except (ValueError, TypeError):
-                    tag = "_row"
+            # row: (id, customer, deadline, file_path, weight, time, material, extra,
+            #       price, note_id, filament_id, printer_id, status)
+            status = row[12] or "Новый"
+            status_label = ORDER_STATUS_LABELS.get(status, status)
+            status_tag = ORDER_STATUS_TAGS.get(status, ORDER_STATUS_TAGS["Новый"])[0]
+            tags = [status_tag]
+            try:
+                if date.fromisoformat(row[2]) < now_date:
+                    tags.append("_overdue")
+            except (ValueError, TypeError):
+                pass
 
             order_id = str(row[0])
             self.tree.insert(
@@ -196,8 +225,9 @@ class OrdersTab(ctk.CTkFrame):
                     f"{row[4]:.0f}",           # weight
                     f"{row[5]:.1f}",           # time
                     f"{row[8]:.2f}",           # price
+                    status_label,              # status
                 ),
-                tags=(tag,),
+                tags=tuple(tags),
             )
             inserted_ids.append(order_id)
 
@@ -216,6 +246,66 @@ class OrdersTab(ctk.CTkFrame):
     def _open_settings(self) -> None:
         """Открыть диалог настроек цен."""
         SettingsDialog(self.main_app.root)
+
+    def _change_selected_status(self) -> None:
+        """Открыть диалог и сохранить новый статус выбранного заказа."""
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo(
+                "Заказы",
+                "Выберите заказ для смены статуса.",
+                parent=self.main_app.root,
+            )
+            return
+
+        order_id = int(selected[0])
+        values = self.tree.item(selected[0], "values")
+        displayed_status = values[6] if len(values) > 6 else ORDER_STATUSES[0]
+        current_status = next(
+            (
+                status
+                for status, label in ORDER_STATUS_LABELS.items()
+                if label == displayed_status
+            ),
+            displayed_status,
+        )
+
+        dialog = ctk.CTkToplevel(self.main_app.root)
+        dialog.title(f"Статус заказа #{order_id}")
+        dialog.geometry("320x170")
+        dialog.resizable(False, False)
+        dialog.transient(self.main_app.root)
+        dialog.grab_set()
+
+        ctk.CTkLabel(dialog, text="Выберите новый статус:", font=APP_FONT).pack(
+            padx=20, pady=(20, 8)
+        )
+        status_menu = ctk.CTkOptionMenu(dialog, values=list(ORDER_STATUSES), font=APP_FONT)
+        status_menu.pack(fill="x", padx=20, pady=4)
+        status_menu.set(
+            current_status if current_status in ORDER_STATUSES else ORDER_STATUSES[0]
+        )
+
+        def save_status() -> None:
+            try:
+                update_order_status(order_id, status_menu.get())
+            except (sqlite3.Error, ValueError) as error:
+                messagebox.showerror(
+                    "Ошибка",
+                    f"Не удалось изменить статус заказа: {error}",
+                    parent=dialog,
+                )
+                return
+
+            dialog.destroy()
+            self.refresh()
+
+        ctk.CTkButton(
+            dialog,
+            text="Сохранить",
+            command=save_status,
+            font=APP_FONT,
+        ).pack(pady=(12, 16))
 
     def _delete_selected(self) -> None:
         selected = self.tree.selection()
@@ -279,11 +369,11 @@ class OrdersTab(ctk.CTkFrame):
         self._show_order_details(values)
 
     def _show_order_details(self, values: tuple) -> None:
-        order_id, customer, deadline, weight, time, price = values
+        order_id, customer, deadline, weight, time, price, status = values
 
         dialog = ctk.CTkToplevel(self.main_app.root)
         dialog.title(f"Заказ #{order_id}")
-        dialog.geometry("400x320")
+        dialog.geometry("400x350")
         dialog.attributes("-topmost", True)
         dialog.transient(self.main_app.root)
         dialog.resizable(False, False)
@@ -297,6 +387,7 @@ class OrdersTab(ctk.CTkFrame):
             f"Вес:           {weight} г",
             f"Время печати:  {time} ч",
             f"Цена:          {price} руб.",
+            f"Статус:        {status}",
         ]
 
         ctk.CTkLabel(
