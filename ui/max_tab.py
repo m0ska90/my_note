@@ -93,7 +93,7 @@ class MaxTab(ctk.CTkFrame):
         attachments_header.pack(fill="x", padx=6, pady=(4, 0))
         self.inbox_list = ctk.CTkScrollableFrame(
             self,
-            height=130,
+            height=60,
             corner_radius=8,
             border_width=1,
             border_color="#cccccc",
@@ -129,7 +129,7 @@ class MaxTab(ctk.CTkFrame):
         # Скроллируемая область с карточками
         self.max_text = ctk.CTkScrollableFrame(
             self,
-            height=250,
+            height=380,
             corner_radius=8,
             border_width=1,
             border_color="#cccccc",
