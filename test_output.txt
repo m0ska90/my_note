@@ -1,0 +1,11 @@
+STDOUT:
+
+
+STDERR:
+Traceback (most recent call last):
+  File "C:\Users\Ilya\Python_Project\my_note\test_direct.py", line 16, in <module>
+    import config  # noqa: F401
+    ^^^^^^^^^^^^^
+  File "C:\Users\Ilya\Python_Project\my_note\config.py", line 5, in <module>
+    from dotenv import load_dotenv
+ModuleNotFoundError: No module named 'dotenv'

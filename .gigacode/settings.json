@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(python *)",
-      "Bash(c:\\users\\ilya\\python_project\\my_note\\.venv\\scripts\\python.exe *)"
+      "Bash(c:\\users\\ilya\\python_project\\my_note\\.venv\\scripts\\python.exe *)",
+      "Bash('c:\\users\\ilya\\python_project\\my_note\\.venv\\scripts\\python.exe' *)",
+      "Bash(out-file *)",
+      "Bash('c:\\users\\ilya\\python_project\\my_note\\.venv\\scripts\\pip.exe' *)",
+      "Bash(select-string *)",
+      "Bash(get-command *)",
+      "Bash(format-list *)",
+      "Bash(dir *)",
+      "Bash(get-content *)",
+      "Bash(::tostring)"
     ]
   },
   "$version": 3

@@ -1,44 +1,26 @@
 # Добавляем корень проекта в sys.path для корректных импортов
 import sys
 import os
+
 _project_root = os.path.dirname(os.path.abspath(__file__))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-import os
-from pathlib import Path
-
-CERT_PATH = Path(__file__).with_name("combined_ca.pem")
-if CERT_PATH.is_file():
-    os.environ["REQUESTS_CA_BUNDLE"] = str(CERT_PATH)
-
-# Загружаем .env ДО импорта config/bot_receiver (они читают env-переменные)
+# Загружаем .env ДО импорта config (он сам читает .env)
 import config  # noqa: F401
 
 import requests
-from crypto_utils import load_token
+import api_client
+from api_client import MAX_API_BASE_URL
+from config import APP_DATA_DIR, INBOX_DIR
+from crypto_utils import TOKEN_FILE, load_token
 
 
-def main() -> int:
+def _check_token(token: str) -> int:
+    """Проверить токен через MAX API /me и вывести результат."""
     try:
-        token = (load_token() or os.environ.get("MAX_BOT_TOKEN", "")).strip()
-    except (OSError, RuntimeError, UnicodeError, ValueError) as error:
-        print(f"Не удалось прочитать сохраненный токен: {error}")
-        return 1
-
-    if not token:
-        print("Токен не найден. Задайте MAX_BOT_TOKEN или выполните --configure-token.")
-        return 1
-
-    if CERT_PATH.is_file():
-        print(f"Используется файл сертификатов: {CERT_PATH}")
-    else:
-        print("Файл combined_ca.pem не найден; используется хранилище сертификатов requests.")
-
-    try:
-        # Пробуем без Bearer - MAX API принимает только токен
         response = requests.get(
-            "https://platform-api2.max.ru/me",
+            f"{MAX_API_BASE_URL}/me",
             headers={"Authorization": token},
             timeout=10,
         )
@@ -72,6 +54,50 @@ def main() -> int:
     else:
         print("MAX API вернул ошибку; тело ответа скрыто, чтобы не выводить лишние данные.")
     return 1
+
+
+def main() -> int:
+    token_from_file = None
+    read_error = None
+
+    try:
+        token_from_file = load_token()
+    except OSError as error:
+        read_error = f"Ошибка чтения файла токена: {error}"
+    except RuntimeError as error:
+        read_error = f"Ошибка расшифровки токена (возможно, файл повреждён или создан другим пользователем Windows): {error}"
+    except UnicodeError as error:
+        read_error = f"Токен содержит некорректные символы после расшифровки: {error}"
+    except ValueError as error:
+        # Валидация токена не пройдена — токен содержит пробелы или управляющие символы
+        print(f"Токен в файле {TOKEN_FILE} не прошёл валидацию: {error}")
+        print("Рекомендация: пересохраните токен через меню настроек бота в приложении или выполните:")
+        print("  python bot_receiver.py --configure-token")
+        return 1
+
+    if read_error:
+        print(f"Не удалось прочитать сохраненный токен: {read_error}")
+        return 1
+
+    # Пробуем ENV как fallback
+    env_token = os.environ.get("MAX_BOT_TOKEN", "")
+    if not env_token:
+        env_token = None
+
+    if not token_from_file and not env_token:
+        print("Токен не найден. Задайте MAX_BOT_TOKEN или выполните --configure-token.")
+        return 1
+
+    token = (token_from_file or env_token).strip()
+
+    # Настраиваем сертификат через api_client
+    cert_info = api_client._setup_cert()
+    if cert_info:
+        print(f"Используется файл сертификатов: {cert_info}")
+    else:
+        print("Файл combined_ca.pem не найден; используется хранилище сертификатов requests.")
+
+    return _check_token(token)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ import logging
 import os
 import sqlite3
 import subprocess
-import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -70,6 +69,8 @@ from ui.max_tab import MaxTab
 
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+
+logger = logging.getLogger("main_window")
 
 
 def get_hwnd(tk_window):

@@ -12,6 +12,17 @@ TOKEN_DIR = TOKEN_FILE.parent
 _LEGACY_TOKEN_FILE = Path(APP_DATA_DIR) / "max_bot_token.dpapi"
 
 
+def _validate_token(token: str) -> str:
+    if not token or not token.isascii() or any(
+        not character.isprintable() or character.isspace()
+        for character in token
+    ):
+        raise ValueError(
+            "Токен должен быть одной строкой ASCII без пробелов и управляющих символов."
+        )
+    return token
+
+
 def _dpapi_transform(data: bytes, decrypt: bool) -> bytes:
     """Encrypt or decrypt bytes using the current Windows user's DPAPI."""
     if os.name != "nt":
@@ -68,8 +79,7 @@ def _dpapi_transform(data: bytes, decrypt: bool) -> bytes:
 
 def save_token(token: str) -> None:
     """Encrypt and atomically save a non-empty token in the user's profile."""
-    if not token:
-        raise ValueError("Токен не может быть пустым.")
+    token = _validate_token(token)
 
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
     encrypted = _dpapi_transform(token.encode("utf-8"), decrypt=False)
@@ -91,5 +101,6 @@ def load_token() -> str | None:
     for token_path in (TOKEN_FILE, _LEGACY_TOKEN_FILE):
         if token_path.is_file():
             encrypted = token_path.read_bytes()
-            return _dpapi_transform(encrypted, decrypt=True).decode("utf-8")
+            token = _dpapi_transform(encrypted, decrypt=True).decode("utf-8")
+            return _validate_token(token)
     return None

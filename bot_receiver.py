@@ -21,6 +21,12 @@ if _project_root not in sys.path:
 
 import requests
 
+from api_client import (
+    MAX_API_BASE_URL,
+    MAX_API_MIN_INTERVAL,
+    _wait_for_api_slot,
+    _setup_cert,
+)
 from config import APP_DATA_DIR as APP_DIR, CERT_PATH, DB_FILE, INBOX_DIR
 from crypto_utils import TOKEN_FILE, load_token, save_token
 from database import (
@@ -43,19 +49,27 @@ if sys.platform == "win32":
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
 
-MAX_API_BASE_URL = "https://platform-api2.max.ru"
-MAX_API_MIN_INTERVAL = 1 / 30
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ — лимит на размер вложения
-_last_api_request = 0.0
+# Настраиваем CA bundle для HTTPS-запросов к MAX API
+_setup_cert()
+
+_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ — лимит на размер вложения
 _BOT_MUTEX_NAME = "Local\\ЗаказикиBotReceiver"
 _BOT_MUTEX_HANDLE = None
 
-# Настраиваем сертификаты
-if os.path.exists(CERT_PATH):
-    os.environ["REQUESTS_CA_BUNDLE"] = CERT_PATH
-
 
 def configure_token() -> None:
+    """Настроить токен через консоль (fallback для разработчиков).
+
+    В .exe (без консоли) использовать GUI — BotSettingsDialog.
+    """
+    if not sys.stdin.isatty():
+        logger.error(
+            "Консольный ввод токена недоступен (stdin не TTY). "
+            "Используйте GUI: меню настроек → MAX-бот → сохранить токен."
+        )
+        print("Ошибка: используйте GUI для настройки токена в .exe.")
+        return
+
     token = getpass.getpass("Введите новый токен MAX (ввод скрыт): ").strip()
     if not token:
         raise ValueError("Токен не может быть пустым.")
@@ -234,13 +248,6 @@ def _fix_extension(file_path: str) -> str:
     return file_path
 
 
-def _wait_for_api_slot() -> None:
-    """Обеспечивает соблюдение лимита запросов к API MAX (не более 30 в секунду)."""
-    global _last_api_request
-    delay = MAX_API_MIN_INTERVAL - (time.monotonic() - _last_api_request)
-    if delay > 0:
-        time.sleep(delay)
-    _last_api_request = time.monotonic()
 
 
 def send_message(bot_token: str, chat_id: int, text: str) -> bool:
@@ -405,10 +412,10 @@ def download_file(bot_token: str, url: str, save_path: str, max_retries: int = 3
                 content_length = response.headers.get("Content-Length")
                 if content_length:
                     try:
-                        if int(content_length) > MAX_FILE_SIZE:
+                        if int(content_length) > _MAX_FILE_SIZE:
                             logger.warning(
                                 "Файл слишком большой: %d байт (лимит %d) для %s",
-                                int(content_length), MAX_FILE_SIZE, url,
+                                int(content_length), _MAX_FILE_SIZE, url,
                             )
                             return False
                     except ValueError:
@@ -422,7 +429,7 @@ def download_file(bot_token: str, url: str, save_path: str, max_retries: int = 3
                             file.write(chunk)
                             downloaded_size += len(chunk)
                             # Защита от disk filling при отсутствии Content-Length
-                            if downloaded_size > MAX_FILE_SIZE:
+                            if downloaded_size > _MAX_FILE_SIZE:
                                 logger.warning(
                                     "Превышен лимит размера файла: %d байт для %s",
                                     downloaded_size, url,

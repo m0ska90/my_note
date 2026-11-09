@@ -11,6 +11,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from shutil import copy2
+from typing import Any
 
 from config import APP_DATA_DIR, DB_FILE, DB_KEY_FILE
 
@@ -25,12 +26,18 @@ ORDER_STATUSES = ("Новый", "В печати", "Готов", "Выдан", "
 
 # Проверяем доступность SQLCipher
 _HAS_SQLCIPHER = False
+_sql_cipher_module = None
+
 try:
     import pysqlcipher3.dbapi2 as sqlcipher  # noqa: F401
+    _sql_cipher_module = sqlcipher
     _HAS_SQLCIPHER = True
     logger.info("Режим шифрования БД: SQLCipher доступен.")
 except ImportError:
     pass
+
+# Абстракция над модулем БД (sqlite3 или pysqlcipher3)
+_db_module = _sql_cipher_module if _HAS_SQLCIPHER else sqlite3
 
 # Глобальная ссылка на пароль ключа (в памяти, пока работает приложение)
 _db_password: str | None = None
@@ -50,12 +57,12 @@ def _get_password() -> str:
 
 
 @contextmanager
-def _connect_db() -> Generator[sqlite3.Connection, None, None]:
+def _connect_db() -> Generator[Any, None, None]:
     """Подключиться к базе данных (шифрованной или обычной)."""
     password = _get_password() if _HAS_SQLCIPHER else None
 
     if _HAS_SQLCIPHER:
-        connection = sqlite3.connect(DB_FILE, timeout=10)
+        connection = _db_module.connect(DB_FILE, timeout=10)
         try:
             connection.execute("PRAGMA key = ?", (password,))
             connection.execute("PRAGMA busy_timeout = 10000")
@@ -64,7 +71,7 @@ def _connect_db() -> Generator[sqlite3.Connection, None, None]:
             connection.execute("SELECT count(*) FROM sqlite_master")
             with connection:
                 yield connection
-        except sqlite3.DatabaseError:
+        except _db_module.DatabaseError:
             connection.close()
             raise ValueError("Неверный пароль шифрования или повреждение базы данных.")
         finally:
@@ -72,7 +79,7 @@ def _connect_db() -> Generator[sqlite3.Connection, None, None]:
                 connection.close()
     else:
         # Fallback: обычный sqlite3 без шифрования
-        connection = sqlite3.connect(DB_FILE, timeout=10)
+        connection = _db_module.connect(DB_FILE, timeout=10)
         try:
             connection.execute("PRAGMA busy_timeout = 10000")
             connection.execute("PRAGMA foreign_keys = ON")
@@ -177,8 +184,7 @@ def init_db() -> None:
                 )
                 """
             )
-            # Миграция: добавляем note_id, filament_id, printer_id если столбцов ещё нет
-            _ensure_orders_note_id_column(conn)
+            # Миграция: добавляем filament_id, printer_id если столбцов ещё нет
             _ensure_orders_filament_id_column(conn)
             _ensure_orders_printer_id_column(conn)
 
@@ -198,19 +204,16 @@ def init_db() -> None:
 
 
 def _ensure_orders_note_id_column(conn) -> None:
-    """Добавить столбец note_id в orders если его ещё нет (миграция)."""
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
+    """Добавить столбец note_id в orders если его ещё нет (миграция).
+
+    Примечание: SQLite не поддерживает добавление FOREIGN KEY CONSTRAINT
+    через ALTER TABLE — используется только DDL CREATE TABLE ... FOREIGN KEY.
+    Ссылочная целостность на уровне БД работает для новой таблицы (init_db).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
+    if "note_id" not in columns:
         conn.execute("ALTER TABLE orders ADD COLUMN note_id INTEGER")
-        conn.execute(
-            "ALTER TABLE orders ADD CONSTRAINT fk_orders_note "
-            "FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE SET NULL"
-        )
         logger.info("Миграция: добавлен столбец note_id в таблицу orders.")
-    except sqlite3.OperationalError as e:
-        # Столбец уже существует или ошибка ограничений — игнорируем
-        if "duplicate column" not in str(e).lower():
-            logger.debug(" orders note_id check: %s", e)
 
 
 def _ensure_orders_filament_id_column(conn) -> None:
@@ -247,19 +250,16 @@ def _init_printers_and_filaments(conn) -> None:
     """Заполнить таблицы printers и filaments начальными данными (если пусто)."""
     cursor = conn.cursor()
 
-    # 1. Принтеры
+    # 1. Принтеры — INSERT OR IGNORE avoids IntegrityError for unique names
     default_printers = [
         "Elegoo Centauri Carbon",
         "Elegoo Centauri Carbon 2",
     ]
     for name in default_printers:
-        try:
-            cursor.execute(
-                "INSERT INTO printers (name) VALUES (?)", (name,)
-            )
-            logger.info("Принтер добавлен: %s", name)
-        except sqlite3.IntegrityError:
-            pass  # уже существует
+        cursor.execute(
+            "INSERT OR IGNORE INTO printers (name) VALUES (?)", (name,)
+        )
+        logger.info("Принтер: %s", name)
 
     # 2. Пластик для каждого принтера
     default_filaments = [
@@ -274,16 +274,13 @@ def _init_printers_and_filaments(conn) -> None:
 
     for (printer_id,) in printers:
         for material, price in default_filaments:
-            try:
-                cursor.execute(
-                    """
-                    INSERT INTO filaments (printer_id, material_type, price_per_gram)
-                    VALUES (?, ?, ?)
-                    """,
-                    (printer_id, material, price),
-                )
-            except sqlite3.IntegrityError:
-                pass  # уже существует
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO filaments (printer_id, material_type, price_per_gram)
+                VALUES (?, ?, ?)
+                """,
+                (printer_id, material, price),
+            )
 
 
 def get_all_printers() -> list[tuple]:
@@ -341,6 +338,8 @@ def get_filament_price(filament_id: int) -> float:
     """Вернуть цену за грамм для пластика.
 
     Если price_per_gram == NULL — возвращает дефолтную цену 2.0 руб/г.
+    При некорректном типе данных в БД (например, строка вместо числа)
+    возвращает дефолтную цену и записывает предупреждение в лог.
     """
     with _connect_db() as conn:
         cursor = conn.cursor()
@@ -350,7 +349,15 @@ def get_filament_price(filament_id: int) -> float:
         )
         row = cursor.fetchone()
         if row and row[0] is not None:
-            return float(row[0])
+            try:
+                return float(row[0])
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "Некорректный тип price_per_gram для filament_id=%d: %r (%s), "
+                    "используется значение по умолчанию 2.0",
+                    filament_id, row[0], e,
+                )
+                return 2.0
         return 2.0  # Дефолтная цена
 
 
@@ -652,7 +659,12 @@ def delete_order(order_id: int) -> None:
 
 
 def update_order_status(order_id: int, new_status: str) -> None:
-    """Обновить статус заказа."""
+    """Обновить статус заказа.
+
+    Если передана пустая строка — восстанавливает статус 'Новый'.
+    """
+    if not new_status:
+        new_status = "Новый"
     if new_status not in ORDER_STATUSES:
         raise ValueError(f"Недопустимый статус заказа: {new_status}")
 
@@ -727,9 +739,6 @@ def clear_attachments(inbox_dir: str) -> list[tuple]:
     Returns:
         Список (file_path,) для удалённых записей.
     """
-    import logging
-    logger = logging.getLogger("db")
-
     clean_rows = []
     with _connect_db() as conn:
         cursor = conn.cursor()
