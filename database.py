@@ -148,6 +148,7 @@ def init_db() -> None:
             # Миграция: добавляем note_id если столбца ещё нет
             _ensure_orders_note_id_column(conn)
             _ensure_orders_status_column(conn)
+            _ensure_orders_note_id_unique(conn)
 
             # Индексы для производительности
             cursor.execute(
@@ -240,6 +241,46 @@ def _ensure_orders_status_column(conn) -> None:
             "ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'Новый'"
         )
         logger.info("Миграция: добавлен столбец status в таблицу orders.")
+
+
+def _ensure_orders_note_id_unique(conn) -> None:
+    """Удалить дубликаты заказов по note_id и создать уникальный индекс.
+
+    1. Проверяем, существует ли уже индекс (иначе выходим).
+    2. Удаляем «лишние» заказы — для каждого note_id оставляем заказ
+       с максимальным id (самый свежий).
+    3. Создаём уникальный индекс.
+    """
+    # Быстрая проверка: существует ли индекс уже?
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+        ("idx_orders_note_id_unique",),
+    )
+    if cursor.fetchone() is not None:
+        return  # индекс уже есть, ничего делать не нужно
+
+    # Удаляем дубликаты: для каждого note_id оставляем заказ с max(id)
+    conn.execute(
+        """
+        DELETE FROM orders
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM orders
+            WHERE note_id IS NOT NULL
+            GROUP BY note_id
+        )
+        """
+    )
+    deleted = conn.total_changes
+    if deleted > 0:
+        logger.info("Миграция: удалено %d дубликатов заказов по note_id.", deleted)
+
+    # Создаём уникальный индекс
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_note_id_unique "
+        "ON orders(note_id)"
+    )
+    logger.info("Миграция: создан уникальный индекс на note_id в orders.")
 
 
 # ================================================================
@@ -587,7 +628,23 @@ def add_order(
     filament_id: int | None = None,
     printer_id: int | None = None,
 ) -> None:
+    """Добавить новый заказ.
+
+    Raises:
+        ValueError: если заказ с данным note_id уже существует.
+    """
     with _connect_db() as conn:
+        # Проверяем, нет ли уже заказа с этим note_id
+        if note_id is not None:
+            cursor = conn.execute(
+                "SELECT 1 FROM orders WHERE note_id = ? LIMIT 1",
+                (note_id,),
+            )
+            if cursor.fetchone() is not None:
+                raise ValueError(
+                    f"Заказ для заметки #{note_id} уже существует."
+                )
+
         conn.execute(
             """
             INSERT INTO orders (
@@ -612,6 +669,22 @@ def add_order(
                 "Новый",
             ),
         )
+
+
+def is_note_processed(note_id: int | None) -> bool:
+    """Проверить, оформлен ли заказ по заметке из MAX.
+
+    Возвращает False, если note_id отсутствует (заметка без ID).
+    """
+    if note_id is None:
+        return False
+
+    with _connect_db() as conn:
+        cursor = conn.execute(
+            "SELECT 1 FROM orders WHERE note_id = ? LIMIT 1",
+            (note_id,),
+        )
+        return cursor.fetchone() is not None
 
 
 def get_all_orders() -> list[tuple]:
@@ -711,6 +784,7 @@ def get_max_text_notes() -> list[tuple]:
             FROM notes
             WHERE title LIKE 'Заметка из MAX%'
             ORDER BY id DESC
+            LIMIT 100
             """
         )
         return cursor.fetchall()

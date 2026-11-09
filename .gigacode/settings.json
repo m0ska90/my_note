@@ -11,7 +11,9 @@
       "Bash(format-list *)",
       "Bash(dir *)",
       "Bash(get-content *)",
-      "Bash(::tostring)"
+      "Bash(::tostring)",
+      "Bash(del *)",
+      "Bash(findstr *)"
     ]
   },
   "$version": 3

@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from config import APP_FONT, BG_PANEL, INBOX_DIR
-from database import clear_max_text_notes
+from database import clear_max_text_notes, is_note_processed
 from ui.bot_settings_dialog import BotSettingsDialog
 from ui.order_dialog import OrderDialog
 
@@ -189,11 +189,12 @@ class MaxTab(ctk.CTkFrame):
 
     def _create_note_card(self, dt: datetime, text: str, note_id: int = None, index: int = 0) -> ctk.CTkFrame:
         """Создать карточку для одной текстовой заметки."""
+        note_processed = is_note_processed(note_id)
         card = ctk.CTkFrame(
             self.max_text,
             corner_radius=8,
             border_width=0,  # Без рамки по умолчанию
-            fg_color="transparent",  # Прозрачный фон
+            fg_color="#E8F5E9" if note_processed else "transparent",
         )
         card.pack(fill="x", padx=4, pady=(0, 6))
         card.configure(cursor="hand2")  # Курсор-рука при наведении
@@ -201,11 +202,15 @@ class MaxTab(ctk.CTkFrame):
         # Сохраняем текст и ID заметки в атрибут карточки
         card.note_text = text
         card.note_id = note_id
+        card.note_processed = note_processed
 
         # Создаём все дочерние элементы с крупным шрифтом, прижаты к левому краю
         time_label = self._create_child_label(
             card,
-            text=f"📅  {dt.strftime('%d.%m.%Y  %H:%M:%S')}",
+            text=(
+                f"📅  {dt.strftime('%d.%m.%Y  %H:%M:%S')}"
+                f"{'  ✅' if note_processed else ''}"
+            ),
             font=("Segoe UI", 16),  # Увеличено для читаемости
             text_color="#888888",
             anchor="w",
@@ -235,7 +240,13 @@ class MaxTab(ctk.CTkFrame):
         return card
 
     def _open_order_dialog(self, file_path: str = "", note_text: str = "", note_id: int = None) -> None:
-        OrderDialog(self.main_app.root, file_path=file_path, note_text=note_text, note_id=note_id)
+        OrderDialog(
+            self.main_app.root,
+            file_path=file_path,
+            note_text=note_text,
+            note_id=note_id,
+            on_saved=self.main_app.refresh_inbox,
+        )
 
     def _bind_card_events(self, card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Привязать события мыши ко всем элементам карточки.
@@ -299,10 +310,13 @@ class MaxTab(ctk.CTkFrame):
                 # Если не выбрана - слегка затемняем
                 card.configure(fg_color="#f0f0f0")
         else:
-            # При уходе мыши - возвращаем прозрачность,
-            # но НЕ сбрасываем выделение
+            # При уходе мыши возвращаем исходный фон, не сбрасывая выделение.
             if card != self.selected_card:
-                card.configure(fg_color="transparent")
+                card.configure(
+                    fg_color="#E8F5E9"
+                    if getattr(card, "note_processed", False)
+                    else "transparent"
+                )
 
     def _on_card_click(self, card: ctk.CTkFrame, text: str, note_id: int = None) -> None:
         """Обработка клика по карточке (вызывается при нажатии мыши)."""
@@ -321,7 +335,11 @@ class MaxTab(ctk.CTkFrame):
             if card is not None:
                 try:
                     if card.winfo_exists():
-                        card.configure(fg_color="transparent")
+                        card.configure(
+                            fg_color="#E8F5E9"
+                            if getattr(card, "note_processed", False)
+                            else "transparent"
+                        )
                         card.configure(border_width=0)
                         card.configure(border_color="#d0d0d0")
                 except tk.TclError:

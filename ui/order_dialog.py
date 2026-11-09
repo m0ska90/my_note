@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from tkinter import filedialog, messagebox
 
@@ -168,12 +169,21 @@ def parse_gcode(file_path: str) -> dict | None:
 
 
 class OrderDialog(ctk.CTkToplevel):
-    def __init__(self, parent, file_path: str = "", note_text: str = "", note_id: int = None, printer_id: int = None):
+    def __init__(
+        self,
+        parent,
+        file_path: str = "",
+        note_text: str = "",
+        note_id: int = None,
+        printer_id: int = None,
+        on_saved: Callable[[], None] | None = None,
+    ):
         super().__init__(parent)
         self.file_path = file_path
         self.note_text = note_text
         self.note_id = note_id
         self.printer_id = printer_id
+        self.on_saved = on_saved
         self.filament_id = None
         self.main_app = parent  # Сохраняем ссылку на главное окно
         self.title("Оформление 3D-заказа")
@@ -494,7 +504,22 @@ class OrderDialog(ctk.CTkToplevel):
                 filament_id=self.filament_id,
                 printer_id=self.printer_id,
             )
-        except (OSError, sqlite3.Error, ValueError) as error:
+        except ValueError as error:
+            msg = str(error)
+            if "уже существует" in msg:
+                tk_messagebox.showerror(
+                    "Дубликат заказа",
+                    f"По этой заметке уже оформлен заказ.\n\n{msg}",
+                    parent=self,
+                )
+            else:
+                tk_messagebox.showerror(
+                    "Ошибка сохранения",
+                    f"Не удалось сохранить заказ: {error}",
+                    parent=self,
+                )
+            return
+        except (OSError, sqlite3.Error) as error:
             tk_messagebox.showerror(
                 "Ошибка сохранения",
                 f"Не удалось сохранить заказ: {error}",
@@ -511,4 +536,6 @@ class OrderDialog(ctk.CTkToplevel):
         # Обновляем вкладку заказов в главном окне ДО закрытия
         if hasattr(self.main_app, 'refresh_orders'):
             self.main_app.refresh_orders()
+        if self.on_saved is not None:
+            self.on_saved()
         self.destroy()
