@@ -1,23 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
-from pathlib import Path
-
 from PyInstaller.utils.hooks import collect_all
 
+datas = []
+binaries = []
+hiddenimports = ['dotenv']
+tmp_ret = collect_all('customtkinter')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-project_dir = Path(SPECPATH)
-ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
 
 a = Analysis(
-    ["main.py"],
-    pathex=[str(project_dir)],
-    binaries=ctk_binaries,
-    datas=ctk_datas + [(str(project_dir / "combined_ca.pem"), ".")],
-    hiddenimports=ctk_hiddenimports + ["dotenv", "bot_receiver", "crypto_utils"],
+    ['main.py'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
+    optimize=0,
 )
 pyz = PYZ(a.pure)
 
@@ -27,7 +29,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="Zakaziki",
+    name='Zakaziki',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
