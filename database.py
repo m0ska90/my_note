@@ -366,6 +366,27 @@ def get_all_printers() -> list[tuple]:
         return printers
 
 
+def add_printer(name: str) -> int:
+    """Добавить принтер и вернуть его ID; повторяющееся имя вызывает ValueError."""
+    try:
+        with _connect_db() as conn:
+            cursor = conn.execute(
+                "INSERT INTO printers (name) VALUES (?)",
+                (name,),
+            )
+            return cursor.lastrowid
+    except _db_module.IntegrityError as exc:
+        if "UNIQUE constraint failed: printers.name" in str(exc):
+            raise ValueError(f"Принтер с именем «{name}» уже существует.") from exc
+        raise
+
+
+def delete_printer(printer_id: int) -> None:
+    """Удалить принтер; связанные пластики и ссылки заказов обрабатываются FK."""
+    with _connect_db() as conn:
+        conn.execute("DELETE FROM printers WHERE id = ?", (printer_id,))
+
+
 def get_setting(key: str, default_value: float) -> float:
     """Вернуть настройку или указанное значение по умолчанию."""
     with _connect_db() as conn:
@@ -403,6 +424,38 @@ def get_filaments_by_printer(printer_id: int) -> list[tuple]:
         result = cursor.fetchall()
         logger.debug("get_filaments_by_printer(%d): %d записей — %s", printer_id, len(result), result)
         return result
+
+
+def add_filament(
+    printer_id: int,
+    material_type: str,
+    price: float,
+) -> None:
+    """Добавить пластик для принтера; дубликат вызывает ValueError."""
+    try:
+        with _connect_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO filaments (printer_id, material_type, price_per_gram)
+                VALUES (?, ?, ?)
+                """,
+                (printer_id, material_type, price),
+            )
+    except _db_module.IntegrityError as exc:
+        if (
+            "UNIQUE constraint failed: filaments.printer_id, "
+            "filaments.material_type"
+        ) in str(exc):
+            raise ValueError(
+                f"Пластик «{material_type}» уже добавлен для этого принтера."
+            ) from exc
+        raise
+
+
+def delete_filament(filament_id: int) -> None:
+    """Удалить пластик по ID."""
+    with _connect_db() as conn:
+        conn.execute("DELETE FROM filaments WHERE id = ?", (filament_id,))
 
 
 def get_filament_by_type(printer_id: int, material_type: str) -> tuple | None:
