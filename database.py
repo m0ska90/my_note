@@ -23,6 +23,12 @@ set_key_path(DB_KEY_FILE)
 logger = logging.getLogger("database")
 
 ORDER_STATUSES = ("Новый", "В печати", "Готов", "Выдан", "Отменен")
+SETTING_DEFAULTS = {
+    "labor_rate": 250.0,
+    "depreciation_rate": 15.0,
+    "electricity_rate": 1.0,
+    "waste_factor": 1.15,
+}
 
 # Проверяем доступность SQLCipher
 _HAS_SQLCIPHER = False
@@ -148,7 +154,6 @@ def init_db() -> None:
             # Миграция: добавляем note_id если столбца ещё нет
             _ensure_orders_note_id_column(conn)
             _ensure_orders_status_column(conn)
-            _ensure_orders_note_id_unique(conn)
 
             # Индексы для производительности
             cursor.execute(
@@ -185,9 +190,18 @@ def init_db() -> None:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value REAL
+                )
+                """
+            )
             # Миграция: добавляем filament_id, printer_id если столбцов ещё нет
             _ensure_orders_filament_id_column(conn)
             _ensure_orders_printer_id_column(conn)
+            _ensure_orders_note_id_unique(conn)
 
             # Индексы для orders (после миграций, когда столбцы уже есть)
             cursor.execute(
@@ -199,6 +213,10 @@ def init_db() -> None:
 
             # Инициализация оборудования
             _init_printers_and_filaments(conn)
+            cursor.executemany(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                SETTING_DEFAULTS.items(),
+            )
     except ValueError:
         logger.error("Неверный пароль шифрования. Перезапустите и введите правильный пароль.")
         raise
@@ -291,7 +309,14 @@ def _init_printers_and_filaments(conn) -> None:
     """Заполнить таблицы printers и filaments начальными данными (если пусто)."""
     cursor = conn.cursor()
 
-    # 1. Принтеры — INSERT OR IGNORE avoids IntegrityError for unique names
+    # Проверяем, есть ли уже данные — если таблица пуста, заполняем
+    cursor.execute("SELECT COUNT(*) FROM printers")
+    count = cursor.fetchone()[0]
+    if count > 0:
+        logger.info("Таблица printers содержит %d записей, пропуск инициализации.", count)
+        return
+
+    # 1. Принтеры
     default_printers = [
         "Elegoo Centauri Carbon",
         "Elegoo Centauri Carbon 2",
@@ -300,7 +325,7 @@ def _init_printers_and_filaments(conn) -> None:
         cursor.execute(
             "INSERT OR IGNORE INTO printers (name) VALUES (?)", (name,)
         )
-        logger.info("Принтер: %s", name)
+        logger.info("Принтер добавлен: %s", name)
 
     # 2. Пластик для каждого принтера
     default_filaments = [
@@ -323,13 +348,43 @@ def _init_printers_and_filaments(conn) -> None:
                 (printer_id, material, price),
             )
 
+    logger.info(
+        "Инициализация оборудования завершена: %d принтеров, "
+        "%d записей пластика.",
+        len(printers), len(printers) * len(default_filaments),
+    )
+
 
 def get_all_printers() -> list[tuple]:
     """Вернуть список всех принтеров: (id, name)."""
     with _connect_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, name FROM printers ORDER BY name")
-        return cursor.fetchall()
+        printers = cursor.fetchall()
+        print(f"[DB] get_all_printers(): {len(printers)} записей — {printers}", flush=True)
+        logger.debug("get_all_printers(): %d записей — %s", len(printers), printers)
+        return printers
+
+
+def get_setting(key: str, default_value: float) -> float:
+    """Вернуть настройку или указанное значение по умолчанию."""
+    with _connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return float(row[0]) if row is not None else default_value
+
+
+def set_setting(key: str, value: float) -> None:
+    """Сохранить настройку, создав или обновив запись."""
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
 
 
 def get_filaments_by_printer(printer_id: int) -> list[tuple]:
@@ -345,7 +400,9 @@ def get_filaments_by_printer(printer_id: int) -> list[tuple]:
             """,
             (printer_id,),
         )
-        return cursor.fetchall()
+        result = cursor.fetchall()
+        logger.debug("get_filaments_by_printer(%d): %d записей — %s", printer_id, len(result), result)
+        return result
 
 
 def get_filament_by_type(printer_id: int, material_type: str) -> tuple | None:

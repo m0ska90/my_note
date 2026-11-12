@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('combined_ca.pem', '.')]
 binaries = []
 hiddenimports = ['dotenv']
 tmp_ret = collect_all('customtkinter')

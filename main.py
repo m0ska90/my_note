@@ -123,10 +123,11 @@ def main():
     def _suppress_ctk_errors(exc_type, exc_val, exc_tb):
         if exc_type is tk.TclError:
             return  # игнорируем TclError от CTk
-        # Выводим остальные ошибки в stderr
+        # Выводим остальные ошибки в stderr, только если он существует
         import traceback
-        sys.stderr.write(f"Exception in Tkinter callback\n")
-        sys.stderr.write(''.join(traceback.format_exception(exc_type, exc_val, exc_tb)))
+        if sys.stderr is not None:
+            sys.stderr.write(f"Exception in Tkinter callback\n")
+            sys.stderr.write(''.join(traceback.format_exception(exc_type, exc_val, exc_tb)))
     root.report_callback_exception = _suppress_ctk_errors
     
     app = NotesApp(root, bot_running_check=_is_bot_running)

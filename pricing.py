@@ -1,6 +1,6 @@
 """Расчёт стоимости 3D-печати."""
 
-from database import get_filament_price
+from database import SETTING_DEFAULTS, get_filament_price, get_setting
 
 
 def calculate_price(
@@ -27,8 +27,21 @@ def calculate_price(
     else:
         material_price = 2.0  # Дефолтная цена
 
-    material_cost = weight_grams * material_price * 1.15
-    labor_cost = time_hours * 250
-    depreciation_cost = time_hours * 15
-    electricity_cost = time_hours * 1
+    material_cost = (
+        weight_grams
+        * material_price
+        * get_setting("waste_factor", SETTING_DEFAULTS["waste_factor"])
+    )
+    labor_cost = time_hours * get_setting(
+        "labor_rate",
+        SETTING_DEFAULTS["labor_rate"],
+    )
+    depreciation_cost = time_hours * get_setting(
+        "depreciation_rate",
+        SETTING_DEFAULTS["depreciation_rate"],
+    )
+    electricity_cost = time_hours * get_setting(
+        "electricity_rate",
+        SETTING_DEFAULTS["electricity_rate"],
+    )
     return material_cost + labor_cost + depreciation_cost + electricity_cost + extra_services
