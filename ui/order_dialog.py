@@ -186,6 +186,9 @@ class OrderDialog(ctk.CTkToplevel):
         self.on_saved = on_saved
         self.filament_id = None
         self.main_app = parent  # Сохраняем ссылку на главное окно
+        # Маппинг: имя -> ID
+        self._printer_name_to_id: dict[str, int] = {}
+        self._filament_name_to_id: dict[str, int] = {}
         self.title("Оформление 3D-заказа")
         window_width = min(520, self.winfo_screenwidth() - 40)
         window_height = min(700, self.winfo_screenheight() - 60)
@@ -333,35 +336,35 @@ class OrderDialog(ctk.CTkToplevel):
         if not printers:
             self.printer_id = None
             self.filament_id = None
+            self._printer_name_to_id = {}
+            self._filament_name_to_id = {}
             self.printer_combo.configure(values=["Нет принтеров"], state="disabled")
             self.printer_combo.set("Нет принтеров")
             self.filament_combo.configure(values=[""], state="disabled")
             self.filament_combo.set("")
             return
-        printer_values = [f"{pid}: {name}" for pid, name in printers]
+        # Создаём маппинг имя -> ID, отображаем только имена
+        self._printer_name_to_id = {name: pid for pid, name in printers}
+        printer_values = [name for pid, name in printers]
         self.printer_combo.configure(values=printer_values, state="readonly")
 
         # Предвыбираем первый или заданный принтер
         if self.printer_id:
-            for pid, name in printers:
+            for name, pid in self._printer_name_to_id.items():
                 if pid == self.printer_id:
-                    self.printer_combo.set(f"{pid}: {name}")
+                    self.printer_combo.set(name)
                     self.printer_id = pid
                     self._load_filaments_for_printer()
                     return
         # Выбираем первый
-        self.printer_combo.set(f"{printers[0][0]}: {printers[0][1]}")
-        self.printer_id = printers[0][0]
+        first_name = printer_values[0]
+        self.printer_combo.set(first_name)
+        self.printer_id = self._printer_name_to_id[first_name]
         self._load_filaments_for_printer()
 
     def _on_printer_change(self, _value: str) -> None:
         """Обработчик смены принтера — загружаем пластики."""
-        parts = _value.split(":", 1)
-        if parts:
-            try:
-                self.printer_id = int(parts[0])
-            except ValueError:
-                pass
+        self.printer_id = self._printer_name_to_id.get(_value)
         self._load_filaments_for_printer()
 
     def _load_filaments_for_printer(self) -> None:
@@ -370,26 +373,21 @@ class OrderDialog(ctk.CTkToplevel):
             return
         filaments = get_filaments_by_printer(self.printer_id)
         if filaments:
-            filament_values = [f"{fid}: {mat}" for fid, mat, _ in filaments]
+            # Создаём маппинг название -> ID, отображаем только названия
+            self._filament_name_to_id = {mat: fid for fid, mat, _ in filaments}
+            filament_values = [mat for _, mat, _ in filaments]
             self.filament_combo.configure(values=filament_values, state="readonly")
-            default_fid = filaments[0][0]
             default_mat = filaments[0][1]
-            self.filament_combo.set(f"{default_fid}: {default_mat}")
-            self.filament_id = default_fid
+            self.filament_combo.set(default_mat)
+            self.filament_id = filaments[0][0]
         else:
             self.filament_combo.configure(values=[""], state="disabled")
             self.filament_combo.set("")
             self.filament_id = None
 
     def _on_filament_change(self, _value: str) -> None:
-        """Обработчик смены пластика — извлекаем ID."""
-        self.filament_id = None
-        parts = _value.split(":", 1)
-        if parts:
-            try:
-                self.filament_id = int(parts[0])
-            except ValueError:
-                pass
+        """Обработчик смены пластика — извлекаем ID из словаря."""
+        self.filament_id = self._filament_name_to_id.get(_value)
 
     def _is_digits_or_empty(self, value: str) -> bool:
         """Разрешает цифры, точку и запятую (для дробных чисел)."""
@@ -487,8 +485,11 @@ class OrderDialog(ctk.CTkToplevel):
             total_price += rush_surcharge
             extra_services += rush_surcharge
 
-        # Получаем материал из комбо-бокса для хранения в orders
-        filament_name = self.filament_combo.get().split(":", 1)[1].strip() if self.filament_combo.get() else "PLA"
+        # Материал для хранения в orders — берём из словаря по ID
+        filament_name = next(
+            (mat for mat, fid in self._filament_name_to_id.items() if fid == self.filament_id),
+            "PLA",
+        ) if self.filament_id else "PLA"
 
         try:
             add_order(

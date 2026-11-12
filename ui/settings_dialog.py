@@ -50,7 +50,8 @@ class SettingsDialog(ctk.CTkToplevel):
         scroll = ctk.CTkScrollableFrame(main_frame, fg_color=BG_MAIN)
         scroll.pack(side="top", fill="both", expand=True, padx=8, pady=8)
 
-        self._printer_ids: dict[str, int] = {}
+        # Маппинг: имя принтера (отображаемое) -> реальный ID из БД
+        self._printer_name_to_id: dict[str, int] = {}
         pad = {"padx": 16, "pady": 6}
 
         # --- Загрузка принтеров ---------------------------------------
@@ -60,10 +61,9 @@ class SettingsDialog(ctk.CTkToplevel):
             "SettingsDialog: получено %d принтеров из БД — %s",
             len(printers), printers,
         )
-        self._printer_ids = {
-            f"{printer_id}: {name}": printer_id
-            for printer_id, name in printers
-        }
+        # Создаём маппинг имя -> ID, отображаем только имена
+        self._printer_name_to_id = {name: pid for pid, name in printers}
+        printer_values = list(self._printer_name_to_id.keys())
 
         # --- Выбор принтера -------------------------------------------
         ctk.CTkLabel(
@@ -71,8 +71,7 @@ class SettingsDialog(ctk.CTkToplevel):
             text="Выберите принтер:",
             font=("Segoe UI", 16, "bold"),
         ).pack(anchor="w", **pad)
-        printer_values = list(self._printer_ids)
-        logger.info("SettingsDialog: ключи для ComboBox — %s", printer_values)
+        logger.info("SettingsDialog: значения для ComboBox — %s", printer_values)
         printer_row = ctk.CTkFrame(scroll, fg_color="transparent")
         printer_row.pack(fill="x", padx=16, pady=(0, 4))
 
@@ -225,7 +224,7 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         add_filament_button.pack(fill="x", pady=(0, 6))
 
-        printer_id = self._printer_ids.get(printer_name)
+        printer_id = self._printer_name_to_id.get(printer_name)
         logger.info("SettingsDialog: printer_id = %r", printer_id)
         if printer_id is None:
             logger.warning("SettingsDialog: printer_id не найден для '%s'", printer_name)
@@ -292,11 +291,11 @@ class SettingsDialog(ctk.CTkToplevel):
         preserved_prices: dict[int, str] | None = None,
     ) -> None:
         printers = get_all_printers()
-        self._printer_ids = {
-            f"{printer_id}: {name}": printer_id
+        self._printer_name_to_id = {
+            name: printer_id
             for printer_id, name in printers
         }
-        printer_values = list(self._printer_ids)
+        printer_values = list(self._printer_name_to_id.keys())
         self.printer_combo.configure(
             values=printer_values or ["Нет принтеров"],
             state="readonly" if printer_values else "disabled",
@@ -305,7 +304,7 @@ class SettingsDialog(ctk.CTkToplevel):
             state="normal" if printer_values else "disabled",
         )
 
-        if selected_printer in self._printer_ids:
+        if selected_printer and selected_printer in self._printer_name_to_id:
             selected = selected_printer
         elif printer_values:
             selected = printer_values[0]
@@ -349,7 +348,7 @@ class SettingsDialog(ctk.CTkToplevel):
 
     def _delete_printer(self) -> None:
         selected = self.printer_combo.get()
-        printer_id = self._printer_ids.get(selected)
+        printer_id = self._printer_name_to_id.get(selected)
         if printer_id is None:
             return
 
@@ -374,7 +373,7 @@ class SettingsDialog(ctk.CTkToplevel):
         }
 
     def _add_filament(self) -> None:
-        printer_id = self._printer_ids.get(self.printer_combo.get())
+        printer_id = self._printer_name_to_id.get(self.printer_combo.get())
         if printer_id is None:
             return
 

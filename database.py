@@ -359,7 +359,7 @@ def get_all_printers() -> list[tuple]:
     """Вернуть список всех принтеров: (id, name)."""
     with _connect_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name FROM printers ORDER BY name")
+        cursor.execute("SELECT id, name FROM printers ORDER BY id")
         printers = cursor.fetchall()
         print(f"[DB] get_all_printers(): {len(printers)} записей — {printers}", flush=True)
         logger.debug("get_all_printers(): %d записей — %s", len(printers), printers)
@@ -417,7 +417,7 @@ def get_filaments_by_printer(printer_id: int) -> list[tuple]:
             SELECT id, material_type, price_per_gram
             FROM filaments
             WHERE printer_id = ?
-            ORDER BY material_type
+            ORDER BY id
             """,
             (printer_id,),
         )
